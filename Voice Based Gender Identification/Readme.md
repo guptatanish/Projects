@@ -32,5 +32,3 @@ Gender classification from voice can be useful in areas like virtual assistants,
 - Random Forest Accuracy: ~96%
 - SVM Accuracy: ~94%
 - KNN Accuracy: ~92%
-
-E
