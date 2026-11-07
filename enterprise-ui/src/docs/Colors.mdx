@@ -1,0 +1,71 @@
+import { Meta, ColorPalette, ColorItem } from '@storybook/blocks';
+
+<Meta title="Design System/Colors" />
+
+# Color Palette
+
+This document outlines the semantic color tokens used across the enterprise component library. These map directly to our Tailwind configuration and CSS variables.
+
+<ColorPalette>
+  <ColorItem
+    title="Background & Foreground"
+    subtitle="Core layout tokens"
+    colors={{ 
+      Background: '#ffffff', 
+      Foreground: '#09090b',
+      'Muted Background': '#f4f4f5',
+      'Muted Foreground': '#71717a'
+    }}
+  />
+  <ColorItem
+    title="Primary"
+    subtitle="Brand and active states"
+    colors={{ 
+      Default: '#3b82f6', 
+      Hover: '#2563eb',
+      Foreground: '#ffffff'
+    }}
+  />
+  <ColorItem
+    title="Destructive (Error)"
+    subtitle="Critical errors and destructive actions"
+    colors={{ 
+      Default: '#ef4444', 
+      Hover: '#dc2626',
+      Foreground: '#ffffff'
+    }}
+  />
+  <ColorItem
+    title="Success"
+    subtitle="Positive confirmations"
+    colors={{ 
+      Default: '#16a34a', 
+      Hover: '#15803d'
+    }}
+  />
+  <ColorItem
+    title="Warning"
+    subtitle="Attention required"
+    colors={{ 
+      Default: '#f59e0b', 
+      Hover: '#d97706'
+    }}
+  />
+  <ColorItem
+    title="Info"
+    subtitle="Neutral informational highlights"
+    colors={{ 
+      Default: '#3b82f6', 
+      Hover: '#2563eb'
+    }}
+  />
+  <ColorItem
+    title="Borders & Inputs"
+    subtitle="Structural dividers"
+    colors={{ 
+      Border: '#e4e4e7',
+      Input: '#888888',
+      'Input Background': '#e5e5e5'
+    }}
+  />
+</ColorPalette>
