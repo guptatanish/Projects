@@ -21,6 +21,7 @@
     "@storybook/addon-a11y": "^8.6.14",
     "@storybook/addon-docs": "^8.6.14",
     "@storybook/addon-essentials": "^8.6.14",
+    "@storybook/addon-themes": "^8.6.14",
     "@storybook/react-vite": "^8.6.14",
     "@tailwindcss/postcss": "^4.3.5",
     "@tailwindcss/vite": "^4.3.5",
@@ -41,6 +42,8 @@
     "vitest": "latest"
   },
   "dependencies": {
+    "@fontsource/inter": "^5.3.0",
+    "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "tailwind-merge": "^3.7.0"
   }

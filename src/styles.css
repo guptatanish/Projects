@@ -21,6 +21,12 @@
   --radius-lg: 0.5rem;
   --radius-md: calc(0.5rem - 2px);
   --radius-sm: calc(0.5rem - 4px);
+
+  /* Typography */
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  
+  /* Colors (keep your existing colors here) */
+  --color-border: hsl(214.3 31.8% 91.4%);
   }
 
 /* Dark Mode Overrides */
