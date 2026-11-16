@@ -34,10 +34,22 @@ export interface ButtonProps
   extends React.ButtonHTMLAttributes<HTMLButtonElement>,
     VariantProps<typeof buttonVariants> {
   pressed?: boolean;
+  buttonBg?: string;
+  textColor?: string;
+  hoverBg?: string;
 }
 
 export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant, size, pressed, disabled, type = "button", ...props }, ref) => {
+  ({ className, variant, size, pressed, disabled, type = "button", buttonBg, textColor, hoverBg, style, ...props }, ref) => {
+    
+    // Map hex codes to CSS variables safely
+    const customStyle = {
+      ...style,
+      ...(buttonBg ? { '--btn-bg': buttonBg } : {}),
+      ...(textColor ? { '--btn-text': textColor } : {}),
+      ...(hoverBg ? { '--btn-hover-bg': hoverBg } : {}),
+    } as React.CSSProperties;
+
     return (
       <button
         ref={ref}
@@ -45,9 +57,14 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         disabled={disabled}
         aria-pressed={pressed}
         data-state={pressed ? "on" : "off"}
+        style={customStyle}
         className={cn(
           buttonVariants({ variant, size, className }),
-          pressed && "bg-secondary-foreground text-secondary hover:bg-secondary-foreground/90"
+          pressed && "bg-secondary-foreground text-secondary hover:bg-secondary-foreground/90",
+          // Apply arbitrary values mapped to the CSS variables if they exist
+          buttonBg && "bg-[color:var(--btn-bg)] border-[color:var(--btn-bg)]",
+          textColor && "text-[color:var(--btn-text)]",
+          hoverBg && "hover:bg-[color:var(--btn-hover-bg)]"
         )}
         {...props}
       />

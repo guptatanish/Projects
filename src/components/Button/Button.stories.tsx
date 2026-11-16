@@ -2,7 +2,13 @@ import React, { useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { Button } from './Button';
 
-const meta: Meta<typeof Button> = {
+type ButtonStoryArgs = React.ComponentProps<typeof Button> & {
+  buttonBg?: string;
+  textColor?: string;
+  hoverBg?: string;
+};
+
+const meta: Meta<ButtonStoryArgs> = {
   title: 'Components/Button',
   component: Button,
   tags: ['autodocs'],
@@ -15,6 +21,18 @@ const meta: Meta<typeof Button> = {
       control: 'select',
       options: ['xsmall', 'small', 'medium', 'large', 'xlarge'],
     },
+    buttonBg: {
+      control: 'color',
+      description: 'Hex code for custom background color (e.g., #3b82f6)',
+    },
+    textColor: {
+      control: 'color',
+      description: 'Hex code for custom text color (e.g., #ffffff)',
+    },
+    hoverBg: {
+      control: 'color',
+      description: 'Hex code for custom hover background (e.g., #1d4ed8)',
+    },
     disabled: { control: 'boolean' },
     pressed: { control: 'boolean' },
     onClick: { action: 'clicked' },
@@ -22,7 +40,7 @@ const meta: Meta<typeof Button> = {
 };
 
 export default meta;
-type Story = StoryObj<typeof Button>;
+type Story = StoryObj<ButtonStoryArgs>;
 
 export const Primary: Story = {
   args: {
@@ -30,6 +48,19 @@ export const Primary: Story = {
     variant: 'primary',
     size: 'medium',
     type: 'button',
+    buttonBg: '',
+    textColor: '',
+    hoverBg: '',
+  },
+};
+
+export const ConfigurableColorsDemo: Story = {
+  args: {
+    children: 'Custom Brand Button',
+    size: 'medium',
+    buttonBg: '#8b5cf6', // Violet-500
+    textColor: '#ffffff',
+    hoverBg: '#6d28d9', // Violet-700
   },
 };
 
