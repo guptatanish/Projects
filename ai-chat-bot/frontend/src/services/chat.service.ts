@@ -1,168 +1,159 @@
+// Phase 1 Chat Service — Talks to FastAPI at http://127.0.0.1:8000/api
+
 import type {
-  ChatMessage,
-  KnowledgeCategory,
-  SendMessageRequest,
-  SendMessageResponse,
+  ApiErrorResponse,
+  ChatRequestPayload,
+  ChatResponsePayload,
+  HealthCheckResponse,
 } from '../types/chat';
 
-function formatTimeNow(): string {
-  return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+// Base address of your Python FastAPI backend running locally
+const API_BASE_URL = 'http://127.0.0.1:8000/api';
+
+// Custom error class so UI components can read both `code` (e.g. "VALIDATION_ERROR") and `message`
+export class ChatApiError extends Error {
+  public readonly code: string;
+  public readonly status: number;
+
+  constructor(code: string, message: string, status = 0) {
+    super(message);
+    this.name = 'ChatApiError';
+    this.code = code;
+    this.status = status;
+  }
 }
 
-function inferCategory(prompt: string, fallback: KnowledgeCategory): Exclude<KnowledgeCategory, 'all'> {
-  if (fallback !== 'all') return fallback;
-  const q = prompt.toLowerCase();
-  if (q.includes('git') || q.includes('repo') || q.includes('enterprise-ui') || q.includes('bot')) {
-    return 'git';
-  }
-  if (q.includes('work') || q.includes('company') || q.includes('role') || q.includes('pr') || q.includes('test')) {
-    return 'work';
-  }
-  if (q.includes('edu') || q.includes('college') || q.includes('degree') || q.includes('timeline') || q.includes('milestone')) {
-    return 'education';
-  }
-  return 'git';
+// Safely checks if a parsed JSON object matches `{ error: { code: string, message: string } }`
+function isApiErrorResponse(value: unknown): value is ApiErrorResponse {
+  if (typeof value !== 'object' || value === null) return false;
+  const candidate = value as { error?: unknown };
+  if (typeof candidate.error !== 'object' || candidate.error === null) return false;
+  const err = candidate.error as { code?: unknown; message?: unknown };
+  return typeof err.code === 'string' && typeof err.message === 'string';
 }
 
-function buildMockAssistantMessage(req: SendMessageRequest): ChatMessage {
-  const createdAt = formatTimeNow();
-  const category = inferCategory(req.prompt, req.scope.category);
-  const attachmentNote =
-    req.attachments.length > 0
-      ? ` (with ${req.attachments.length} attachment${req.attachments.length > 1 ? 's' : ''})`
-      : '';
+// Calls GET /api/health to check if the backend server is reachable
+export async function checkBackendHealth(signal?: AbortSignal): Promise<HealthCheckResponse> {
+  let response: Response;
 
-  if (category === 'work') {
-    return {
-      id: `msg-${Date.now()}-a`,
-      conversationId: req.conversationId,
-      role: 'assistant',
-      content: `Here is a structured look at your work experience and engineering workflow${attachmentNote} (${req.scope.detailLevel} view):`,
-      createdAt,
-      categoryTag: 'work',
-      heroFormat: 'comparison-table',
-      comparisonTable: {
-        title: 'Work & Engineering Matrix',
-        columns: ['Domain', 'Stack / Workflow', 'Day-to-Day Focus'],
-        rows: [
-          ['Frontend App', 'React, TypeScript, Monorepo', 'UI features, data tables, clean state'],
-          ['Code Quality', 'PRs, Linting, SonarQube', 'Safe merges, consistent patterns, reviews'],
-          ['Testing & Hiring', 'Unit Tests, DOM, React Hooks', 'Test scripts and technical interviews'],
-        ],
+  try {
+    response = await fetch(`${API_BASE_URL}/health`, {
+      method: 'GET',
+      credentials: 'include',
+      signal,
+    });
+  } catch (err) {
+    if ((err as Error)?.name === 'AbortError') {
+      throw err;
+    }
+    throw new ChatApiError(
+      'NETWORK_ERROR',
+      'Cannot reach the backend server at http://127.0.0.1:8000. Make sure FastAPI is running.',
+      0
+    );
+  }
+
+  let parsedBody: unknown = null;
+  try {
+    parsedBody = await response.json();
+  } catch {
+    parsedBody = null;
+  }
+
+  if (!response.ok) {
+    if (isApiErrorResponse(parsedBody)) {
+      throw new ChatApiError(parsedBody.error.code, parsedBody.error.message, response.status);
+    }
+    throw new ChatApiError(
+      'HTTP_ERROR',
+      `Health check failed with status ${response.status}.`,
+      response.status
+    );
+  }
+
+  return parsedBody as HealthCheckResponse;
+}
+
+// Sends a user's message to POST /api/chat and returns the backend's ChatResponsePayload
+export async function sendChatMessage(
+  messageText: string,
+  signal?: AbortSignal
+): Promise<ChatResponsePayload> {
+  // Trim leading/trailing spaces before sending so pure spaces are caught cleanly
+  const trimmedMessage = messageText.trim();
+
+  if (!trimmedMessage) {
+    throw new ChatApiError(
+      'VALIDATION_ERROR',
+      'message: Message cannot be empty or whitespace only.',
+      422
+    );
+  }
+
+  const requestBody: ChatRequestPayload = {
+    message: trimmedMessage,
+  };
+
+  let response: Response;
+
+  try {
+    // `fetch` is the browser's built-in function to send HTTP requests to another URL
+    response = await fetch(`${API_BASE_URL}/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
       },
-      accordionNotes: [
-        {
-          id: 'note-work-1',
-          title: 'Backend Integration Readiness',
-          content:
-            'When the Express + PostgreSQL + Gemini service is wired up, this response will come from recent conversation context and your persisted profile knowledge base.',
-        },
-      ],
-    };
+      // `credentials: 'include'` ensures cookies work smoothly now and in Phase 4 auth
+      credentials: 'include',
+      // `JSON.stringify` converts the JS object `{ message: "..." }` into JSON text for HTTP
+      body: JSON.stringify(requestBody),
+      // `signal` lets the user cancel/stop an in-flight request if needed
+      signal,
+    });
+  } catch (err) {
+    if ((err as Error)?.name === 'AbortError') {
+      throw err;
+    }
+    throw new ChatApiError(
+      'NETWORK_ERROR',
+      'Unable to connect to the backend at http://127.0.0.1:8000. Please check if the server is running.',
+      0
+    );
   }
 
-  if (category === 'education') {
-    return {
-      id: `msg-${Date.now()}-a`,
-      conversationId: req.conversationId,
-      role: 'assistant',
-      content: `Here is your education and milestone progression${attachmentNote}:`,
-      createdAt,
-      categoryTag: 'education',
-      heroFormat: 'timeline-stepper',
-      timelineMilestones: [
-        {
-          id: 'ms-edu-1',
-          title: 'Academic & Project Foundations',
-          subtitle: 'Core CS, Projects & Pitch Reviews',
-          dateLabel: 'Stage 1',
-          description: 'Built foundational software projects, structured presentations, and problem-solving habits.',
-          badge: 'Education',
-        },
-        {
-          id: 'ms-edu-2',
-          title: 'Production Frontend & Testing',
-          subtitle: 'React + TypeScript Engineering',
-          dateLabel: 'Stage 2',
-          description: 'Applied TypeScript, component design, and testing practices in real-world codebases.',
-          badge: 'Work',
-        },
-        {
-          id: 'ms-edu-3',
-          title: 'Design System & AI Assistant UI',
-          subtitle: 'enterprise-ui & ai-chat-bot',
-          dateLabel: '2026',
-          description: 'Created a modular React design system and a Gemini-style profile assistant interface.',
-          badge: 'Git',
-        },
-      ],
-    };
+  let parsedBody: unknown = null;
+  try {
+    parsedBody = await response.json();
+  } catch {
+    parsedBody = null;
+  }
+
+  // Any HTTP status outside 200–299 (like 422, 404, 405, 500) is treated as an error
+  if (!response.ok) {
+    if (isApiErrorResponse(parsedBody)) {
+      throw new ChatApiError(parsedBody.error.code, parsedBody.error.message, response.status);
+    }
+
+    throw new ChatApiError(
+      'HTTP_ERROR',
+      `Server returned status ${response.status} (${response.statusText || 'Request failed'}).`,
+      response.status
+    );
+  }
+
+  const data = parsedBody as Partial<ChatResponsePayload>;
+  if (typeof data?.reply !== 'string') {
+    throw new ChatApiError(
+      'INVALID_RESPONSE',
+      'Backend returned an unexpected response format.',
+      response.status
+    );
   }
 
   return {
-    id: `msg-${Date.now()}-a`,
-    conversationId: req.conversationId,
+    reply: data.reply,
     role: 'assistant',
-    content: `Here is a profile breakdown from your personal Git projects & stack${attachmentNote}:`,
-    createdAt,
-    categoryTag: 'git',
-    heroFormat: 'project-card',
-    projectCard: {
-      title: req.scope.focusEntity || 'enterprise-ui & ai-chat-bot Frontend',
-      category: 'git',
-      summary:
-        'Built with React 19, TypeScript, Vite, and Tailwind CSS v4—combining reusable enterprise UI primitives with a focused Gemini-style chat workspace.',
-      stack: ['React 19', 'TypeScript', 'Vite', 'Tailwind CSS v4', 'Node.js'],
-      highlights: [
-        'Consumes local enterprise-ui components and @source styling cleanly',
-        'Keeps service contracts (chat, conversation, auth) decoupled for the backend API',
-        'Supports category filtering, attachments, and structured single-hero message views',
-      ],
-      repoOrOrg: 'Local Monorepo / Personal Git',
-      period: '2026',
-      collapsibleNotes:
-        'Mock UI note: Swap the mock generator inside chat.service.ts with your backend POST endpoint once the Express + Prisma + Gemini API is ready.',
-    },
+    mode: typeof data.mode === 'string' ? data.mode : 'mock',
+    model: data.model ?? null,
   };
 }
-
-export interface ChatService {
-  sendMessage(request: SendMessageRequest, signal?: AbortSignal): Promise<SendMessageResponse>;
-}
-
-export const chatService: ChatService = {
-  async sendMessage(request: SendMessageRequest, signal?: AbortSignal): Promise<SendMessageResponse> {
-    const trimmed = request.prompt.trim();
-    const userMessage: ChatMessage = {
-      id: `msg-${Date.now()}-u`,
-      conversationId: request.conversationId,
-      role: 'user',
-      content: trimmed || 'Shared an attachment for profile context.',
-      createdAt: formatTimeNow(),
-      attachments: request.attachments,
-      categoryTag: request.scope.category === 'all' ? undefined : request.scope.category,
-    };
-
-    await new Promise<void>((resolve, reject) => {
-      const timer = window.setTimeout(resolve, 650);
-      if (signal) {
-        if (signal.aborted) {
-          window.clearTimeout(timer);
-          reject(new DOMException('Aborted', 'AbortError'));
-          return;
-        }
-        signal.addEventListener(
-          'abort',
-          () => {
-            window.clearTimeout(timer);
-            reject(new DOMException('Aborted', 'AbortError'));
-          },
-          { once: true }
-        );
-      }
-    });
-
-    const assistantMessage = buildMockAssistantMessage(request);
-    return { userMessage, assistantMessage };
-  },
-};
