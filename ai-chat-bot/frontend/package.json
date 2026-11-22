@@ -1,7 +1,7 @@
 {
-  "name": "temp-vite",
+  "name": "ai-chat-bot-frontend",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,6 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@fontsource/inter": "^5.3.0",
     "@tailwindcss/vite": "^4.3.5",
     "enterprise-ui": "file:../../enterprise-ui",
     "react": "^19.3.1",
