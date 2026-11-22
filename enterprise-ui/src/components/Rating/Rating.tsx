@@ -44,6 +44,14 @@ const sizeConfig = {
   },
 } as const;
 
+const isValidRenderableIcon = (val: unknown): val is React.ReactNode => {
+  if (val === null || val === undefined || typeof val === 'boolean') return false;
+  if (typeof val === 'string' || typeof val === 'number') return true;
+  if (React.isValidElement(val)) return true;
+  if (Array.isArray(val)) return val.some((item) => isValidRenderableIcon(item));
+  return false;
+};
+
 export interface RatingProps extends Omit<React.HTMLAttributes<HTMLDivElement>, 'defaultValue' | 'onChange'> {
   value?: number;
   defaultValue?: number;
@@ -102,6 +110,7 @@ export const Rating = React.forwardRef<HTMLDivElement, RatingProps>(
 
     const safeMax = Math.max(1, Math.floor(max));
     const step = allowHalf ? 0.5 : 1;
+    const safeIcon = isValidRenderableIcon(icon) ? icon : undefined;
 
     const clampRating = (val: number) => {
       const clamped = Math.min(Math.max(val, 0), safeMax);
@@ -213,18 +222,33 @@ export const Rating = React.forwardRef<HTMLDivElement, RatingProps>(
               ? currentValue === itemValue || currentValue === itemValue - 0.5
               : currentValue === itemValue;
 
-            const renderGlyph = (fillHex: string, strokeHex: string) => {
-              if (icon) {
+            const renderGlyph = (fillHex: string, strokeHex: string, layerSuffix: string) => {
+              if (safeIcon) {
+                if (React.isValidElement<React.SVGProps<SVGSVGElement>>(safeIcon)) {
+                  return React.cloneElement(safeIcon, {
+                    key: `${groupId}-${layerSuffix}-${index}`,
+                    width: metrics.iconPx,
+                    height: metrics.iconPx,
+                    fill: fillHex,
+                    stroke: strokeHex,
+                    style: {
+                      ...(safeIcon.props.style || {}),
+                      color: fillHex !== 'transparent' ? fillHex : strokeHex,
+                    },
+                    className: cn('block shrink-0', safeIcon.props.className),
+                  });
+                }
                 return (
                   <span
+                    key={`${groupId}-${layerSuffix}-${index}`}
                     style={{
                       width: `${metrics.iconPx}px`,
                       height: `${metrics.iconPx}px`,
-                      color: fillHex !== 'transparent' ? fillHex : undefined,
+                      color: fillHex !== 'transparent' ? fillHex : strokeHex,
                     }}
                     className="inline-flex items-center justify-center shrink-0"
                   >
-                    {icon}
+                    {safeIcon}
                   </span>
                 );
               }
@@ -270,7 +294,7 @@ export const Rating = React.forwardRef<HTMLDivElement, RatingProps>(
                 )}
               >
                 {/* Base / Unfilled Star */}
-                {renderGlyph(resolvedInactive, fillRatio > 0 ? resolvedStroke : '#9ca3af')}
+                {renderGlyph(resolvedInactive, fillRatio > 0 ? resolvedStroke : '#9ca3af', 'base')}
 
                 {/* Filled / Partial Overlay */}
                 {fillRatio > 0 && (
@@ -281,7 +305,7 @@ export const Rating = React.forwardRef<HTMLDivElement, RatingProps>(
                     }}
                     className="absolute inset-y-0 left-0 overflow-hidden inline-flex items-center justify-start pointer-events-none"
                   >
-                    {renderGlyph(resolvedActive, resolvedStroke)}
+                    {renderGlyph(resolvedActive, resolvedStroke, 'fill')}
                   </span>
                 )}
               </button>

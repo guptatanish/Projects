@@ -1,4 +1,4 @@
-import React, { useId, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from '../../utils/cn';
 
@@ -86,6 +86,25 @@ export const RadioGroup = React.forwardRef<HTMLDivElement, RadioGroupProps>(
   ) => {
     const groupId = useId();
     const groupName = name || groupId;
+    const rootRef = useRef<HTMLDivElement | null>(null);
+    const [isDarkContext, setIsDarkContext] = useState(false);
+
+    useEffect(() => {
+      const checkDark = () => {
+        const el = rootRef.current;
+        if (!el) return;
+        setIsDarkContext(Boolean(el.closest('.dark')));
+      };
+      checkDark();
+
+      const el = rootRef.current;
+      if (!el || typeof MutationObserver === 'undefined') return;
+      const observer = new MutationObserver(checkDark);
+      const ancestor = el.closest('.dark') || document.documentElement;
+      observer.observe(ancestor, { attributes: true, attributeFilter: ['class'] });
+      return () => observer.disconnect();
+    }, []);
+
     const isControlled = value !== undefined;
     const [internalValue, setInternalValue] = useState<string | undefined>(defaultValue);
     const [hoveredValue, setHoveredValue] = useState<string | null>(null);
@@ -93,6 +112,7 @@ export const RadioGroup = React.forwardRef<HTMLDivElement, RadioGroupProps>(
     const currentValue = isControlled ? value : internalValue;
     const resolvedOrientation = orientation ?? 'vertical';
     const metrics = sizeConfig[size || 'medium'];
+    const resolvedLabelColor = textColor || (isDarkContext ? '#f4f4f5' : '#111111');
 
     const selectValue = (nextValue: string) => {
       if (!isControlled) {
@@ -133,7 +153,14 @@ export const RadioGroup = React.forwardRef<HTMLDivElement, RadioGroupProps>(
 
     return (
       <div
-        ref={ref}
+        ref={(node) => {
+          rootRef.current = node;
+          if (typeof ref === 'function') {
+            ref(node);
+          } else if (ref) {
+            (ref as React.MutableRefObject<HTMLDivElement | null>).current = node;
+          }
+        }}
         role="radiogroup"
         aria-disabled={disabled || undefined}
         style={{
@@ -159,9 +186,9 @@ export const RadioGroup = React.forwardRef<HTMLDivElement, RadioGroupProps>(
 
           const resolvedBorder = isChecked && activeColor
             ? activeColor
-            : borderColor || undefined;
+            : borderColor || (isDarkContext ? '#71717a' : undefined);
 
-          const resolvedDotColor = activeColor || undefined;
+          const resolvedDotColor = activeColor || (isDarkContext ? '#ffffff' : undefined);
 
           return (
             <div
@@ -201,6 +228,11 @@ export const RadioGroup = React.forwardRef<HTMLDivElement, RadioGroupProps>(
                     width: `${metrics.circlePx}px`,
                     height: `${metrics.circlePx}px`,
                     borderColor: resolvedBorder,
+                    backgroundColor: isChecked
+                      ? activeColor
+                        ? (isDarkContext ? '#18181b' : '#ffffff')
+                        : (isDarkContext ? '#18181b' : '#ffffff')
+                      : 'transparent',
                   }}
                   className={cn(
                     "shrink-0 rounded-full border-2 flex items-center justify-center transition-colors",
@@ -231,7 +263,7 @@ export const RadioGroup = React.forwardRef<HTMLDivElement, RadioGroupProps>(
                 </span>
 
                 <span
-                  style={textColor ? { color: textColor } : undefined}
+                  style={{ color: resolvedLabelColor }}
                   className={cn(
                     "font-medium whitespace-nowrap",
                     metrics.labelClass,

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from '../../utils/cn';
 
@@ -31,7 +31,7 @@ export interface ProgressBarProps extends React.HTMLAttributes<HTMLDivElement>, 
   max?: number;
   indeterminate?: boolean;
   showLabel?: boolean;
-  
+
   // Custom Colors
   indicatorBg?: string;
   trackBg?: string;
@@ -52,17 +52,43 @@ export const ProgressBar = React.forwardRef<HTMLDivElement, ProgressBarProps>(
     style,
     ...props
   }, ref) => {
+    const rootRef = useRef<HTMLDivElement | null>(null);
+    const [isDarkContext, setIsDarkContext] = useState(false);
+
+    useEffect(() => {
+      const checkDark = () => {
+        const el = rootRef.current;
+        if (!el) return;
+        setIsDarkContext(Boolean(el.closest('.dark')));
+      };
+      checkDark();
+
+      const el = rootRef.current;
+      if (!el || typeof MutationObserver === 'undefined') return;
+      const observer = new MutationObserver(checkDark);
+      const ancestor = el.closest('.dark') || document.documentElement;
+      observer.observe(ancestor, { attributes: true, attributeFilter: ['class'] });
+      return () => observer.disconnect();
+    }, []);
+
     const safeValue = Math.min(Math.max(value, 0), max);
     const percentage = max > 0 ? Math.round((safeValue / max) * 100) : 0;
 
+    const resolvedTextColor = textColor || (isDarkContext ? '#f4f4f5' : '#111111');
+    const resolvedTrackBg = trackBg || (isDarkContext ? '#27272a' : '#E5E5E5');
+    const resolvedIndicatorBg = indicatorBg || (isDarkContext ? '#ffffff' : '#111111');
+
     return (
-      <div className={cn("flex w-full flex-col gap-1.5", className)} style={style}>
-        
+      <div
+        ref={rootRef}
+        className={cn("flex w-full flex-col gap-1.5", className)}
+        style={style}
+      >
         {showLabel && (
           <div className="flex items-center justify-between text-sm font-medium">
-            <span 
+            <span
               className={cn(!textColor && "text-black dark:text-zinc-100")}
-              style={textColor ? { color: textColor } : undefined}
+              style={{ color: resolvedTextColor }}
             >
               {percentage}%
             </span>
@@ -82,7 +108,7 @@ export const ProgressBar = React.forwardRef<HTMLDivElement, ProgressBarProps>(
           style={{
             // Hardcoding the height inline guarantees it will always render
             height: heightMap[size || "medium"],
-            ...(trackBg ? { backgroundColor: trackBg } : {})
+            backgroundColor: resolvedTrackBg,
           }}
           {...props}
         >
@@ -92,9 +118,9 @@ export const ProgressBar = React.forwardRef<HTMLDivElement, ProgressBarProps>(
               !indicatorBg && "bg-black dark:bg-white",
               indeterminate && "w-full animate-pulse opacity-70"
             )}
-            style={{ 
+            style={{
               width: indeterminate ? '100%' : `${percentage}%`,
-              backgroundColor: indicatorBg ? indicatorBg : undefined 
+              backgroundColor: resolvedIndicatorBg,
             }}
           />
         </div>

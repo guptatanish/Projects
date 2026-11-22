@@ -71,6 +71,7 @@ export const OverflowMenu = React.forwardRef<HTMLDivElement, OverflowMenuProps>(
     ...props
   }, ref) => {
     const [isOpen, setIsOpen] = useState(false);
+    const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
     const containerRef = useRef<HTMLDivElement>(null);
 
     // Handle outside clicks
@@ -110,24 +111,15 @@ export const OverflowMenu = React.forwardRef<HTMLDivElement, OverflowMenuProps>(
       setIsOpen(false);
     }, []);
 
-    // Safe inline CSS variables mapping
-    const customStyle = {
-      ...style,
-      ...(menuBg ? { '--om-bg': menuBg } : {}),
-      ...(itemHoverBg ? { '--om-hover': itemHoverBg } : {}),
-      ...(borderColor ? { '--om-border': borderColor } : {}),
-      ...(textColor ? { '--om-text': textColor } : {}),
-    } as React.CSSProperties;
-
     return (
-      <div 
+      <div
         ref={(node) => {
           (containerRef as any).current = node;
           if (typeof ref === 'function') ref(node);
           else if (ref) (ref as any).current = node;
         }}
-        style={customStyle}
-        className={cn("relative inline-block text-left", className)} 
+        style={style}
+        className={cn("relative inline-block text-left", className)}
         {...props}
       >
         {/* Trigger */}
@@ -137,9 +129,9 @@ export const OverflowMenu = React.forwardRef<HTMLDivElement, OverflowMenuProps>(
           disabled={disabled}
           aria-haspopup="true"
           aria-expanded={isOpen}
+          style={!customTrigger && textColor ? { color: textColor } : undefined}
           className={cn(
-            customTrigger ? "" : triggerVariants({ size, disabled }),
-            textColor && !customTrigger && "text-[var(--om-text)] dark:text-[var(--om-text)]"
+            customTrigger ? "inline-flex items-center cursor-pointer" : triggerVariants({ size, disabled })
           )}
         >
           {customTrigger ? customTrigger : (
@@ -155,38 +147,49 @@ export const OverflowMenu = React.forwardRef<HTMLDivElement, OverflowMenuProps>(
           <div
             role="menu"
             aria-orientation="vertical"
+            style={{
+              ...(menuBg ? { backgroundColor: menuBg } : {}),
+              ...(borderColor ? { borderColor } : {}),
+            }}
             className={cn(
               "absolute z-50 mt-1 w-48 rounded-md border shadow-lg outline-none",
               align === 'right' ? 'right-0 origin-top-right' : 'left-0 origin-top-left',
-              menuBg ? "bg-[var(--om-bg)]" : "bg-white dark:bg-zinc-950",
-              borderColor ? "border-[var(--om-border)]" : "border-[#e5e5e5] dark:border-zinc-800"
+              !menuBg && "bg-white dark:bg-zinc-950",
+              !borderColor && "border-[#e5e5e5] dark:border-zinc-800"
             )}
           >
             <div className="py-1" role="none">
               {items.map((item, index) => {
                 const isDestructive = item.destructive && !item.disabled;
-                
+                const isHovered = hoveredIndex === index && !item.disabled;
+
                 return (
                   <React.Fragment key={index}>
                     <button
                       type="button"
                       role="menuitem"
                       disabled={item.disabled}
+                      onMouseEnter={() => setHoveredIndex(index)}
+                      onMouseLeave={() => setHoveredIndex(null)}
                       onClick={() => handleItemClick(item)}
+                      style={{
+                        ...(!isDestructive && textColor ? { color: textColor } : {}),
+                        ...(isHovered && !isDestructive && itemHoverBg ? { backgroundColor: itemHoverBg } : {}),
+                      }}
                       className={cn(
                         "flex w-full items-center px-4 py-2 text-sm transition-colors text-left",
                         item.disabled && "opacity-50 cursor-not-allowed",
-                        
-                        // Default vs Custom Text Colors
-                        !isDestructive && textColor && "text-[var(--om-text)]",
+                        !item.disabled && "cursor-pointer",
+
+                        // Default Text Colors
                         !isDestructive && !textColor && "text-black dark:text-zinc-200",
-                        
-                        // Hover States
-                        !item.disabled && !isDestructive && !itemHoverBg && "hover:bg-black/5 dark:hover:bg-white/10",
-                        !item.disabled && !isDestructive && itemHoverBg && "hover:bg-[var(--om-hover)] dark:hover:bg-[var(--om-hover)]",
-                        
+
+                        // Default Hover States
+                        isHovered && !isDestructive && !itemHoverBg && "bg-black/5 dark:bg-white/10",
+
                         // Destructive Mode
-                        isDestructive && "text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30"
+                        isDestructive && "text-red-600 dark:text-red-400",
+                        isHovered && isDestructive && "bg-red-50 dark:bg-red-950/30"
                       )}
                     >
                       {item.icon && (
@@ -196,12 +199,15 @@ export const OverflowMenu = React.forwardRef<HTMLDivElement, OverflowMenuProps>(
                       )}
                       <span className="truncate">{item.label}</span>
                     </button>
-                    
+
                     {item.divider && index !== items.length - 1 && (
-                      <div className={cn(
-                        "my-1 border-b",
-                        borderColor ? "border-[var(--om-border)]" : "border-[#e5e5e5] dark:border-zinc-800"
-                      )} />
+                      <div
+                        style={borderColor ? { borderColor } : undefined}
+                        className={cn(
+                          "my-1 border-b",
+                          !borderColor && "border-[#e5e5e5] dark:border-zinc-800"
+                        )}
+                      />
                     )}
                   </React.Fragment>
                 );

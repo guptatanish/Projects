@@ -47,25 +47,73 @@ const icons = {
   ),
 };
 
+const isCssColorValue = (value?: string) => {
+  if (!value) return false;
+  const trimmed = value.trim();
+  return (
+    trimmed.startsWith('#') ||
+    trimmed.startsWith('rgb(') ||
+    trimmed.startsWith('rgba(') ||
+    trimmed.startsWith('hsl(') ||
+    trimmed.startsWith('hsla(') ||
+    trimmed.startsWith('oklch(')
+  );
+};
+
 export interface BannerProps extends Omit<React.HTMLAttributes<HTMLDivElement>, 'action'>, VariantProps<typeof bannerVariants> {
   isDismissible?: boolean;
   onClose?: () => void;
   action?: React.ReactNode;
   icon?: React.ReactNode | null;
-  bannerBg?: string; 
+  bannerBg?: string;
   contentColor?: string;
+  borderColor?: string;
 }
 
 export const Banner = React.forwardRef<HTMLDivElement, BannerProps>(
-  ({ className, variant = 'default', position = 'relative', isDismissible = false, onClose, action, icon, bannerBg, contentColor, children, ...props }, ref) => {
-    
+  (
+    {
+      className,
+      variant = 'default',
+      position = 'relative',
+      isDismissible = false,
+      onClose,
+      action,
+      icon,
+      bannerBg,
+      contentColor,
+      borderColor,
+      style,
+      children,
+      ...props
+    },
+    ref
+  ) => {
     const displayIcon = icon !== undefined ? icon : (variant ? icons[variant] : icons.default);
 
+    const isCustomBgColor = isCssColorValue(bannerBg);
+    const isCustomTextColor = isCssColorValue(contentColor);
+    const isCustomBorderColor = isCssColorValue(borderColor);
+
+    const customStyle: React.CSSProperties = {
+      ...style,
+      ...(isCustomBgColor ? { backgroundColor: bannerBg } : {}),
+      ...(isCustomTextColor ? { color: contentColor } : {}),
+      ...(isCustomBorderColor ? { borderColor } : {}),
+    };
+
     return (
-      <div 
-        ref={ref} 
+      <div
+        ref={ref}
         role={variant === 'destructive' || variant === 'warning' ? 'alert' : 'status'}
-        className={cn(bannerVariants({ variant, position }), bannerBg, contentColor, className)} 
+        style={customStyle}
+        className={cn(
+          bannerVariants({ variant, position }),
+          !isCustomBgColor && bannerBg,
+          !isCustomTextColor && contentColor,
+          !isCustomBorderColor && borderColor,
+          className
+        )}
         {...props}
       >
         <div className="flex flex-1 items-center gap-3">
@@ -75,7 +123,7 @@ export const Banner = React.forwardRef<HTMLDivElement, BannerProps>(
 
         <div className="flex shrink-0 items-center gap-4">
           {action && <div>{action}</div>}
-          
+
           {isDismissible && (
             <button
               type="button"

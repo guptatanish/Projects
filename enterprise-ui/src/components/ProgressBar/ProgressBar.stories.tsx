@@ -117,7 +117,10 @@ export const DarkModeDocs: Story = {
     showLabel: true,
   },
   render: (args) => (
-    <div className="dark bg-zinc-950 p-8 rounded-md border border-zinc-800 w-full max-w-md pb-16">
+    <div
+      style={{ backgroundColor: '#09090b', borderColor: '#27272a', padding: '24px' }}
+      className="dark rounded-md border w-full max-w-md pb-16"
+    >
       <div className="text-sm font-semibold text-zinc-400 mb-6">Progress Bar (Dark Context)</div>
       <ProgressBar {...args} />
     </div>

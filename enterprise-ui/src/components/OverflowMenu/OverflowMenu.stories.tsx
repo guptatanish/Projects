@@ -78,7 +78,7 @@ export const Alignment: Story = {
 export const CustomTrigger: Story = {
   args: {
     items: defaultItems,
-    align: 'right',
+    align: 'left',
     customTrigger: (
       <span className="px-3 py-1.5 text-sm bg-black text-white rounded-md hover:bg-black/80 dark:bg-white dark:text-black transition-colors">
         Actions ▾
@@ -86,14 +86,15 @@ export const CustomTrigger: Story = {
     ),
   },
   render: (args) => (
-    <div className="pb-48">
-      <OverflowMenu {...args} />
+    <div className="p-4 pb-48 flex justify-start">
+      <OverflowMenu {...args} items={defaultItems} />
     </div>
   ),
 };
 
 export const DisabledItems: Story = {
   args: {
+    align: 'left',
     items: [
       { label: 'View Details', onClick: () => {} },
       { label: 'Edit Details', disabled: true, onClick: () => {} },
@@ -101,7 +102,7 @@ export const DisabledItems: Story = {
     ],
   },
   render: (args) => (
-    <div className="pb-40">
+    <div className="p-4 pb-44 flex justify-start">
       <OverflowMenu {...args} />
     </div>
   ),
@@ -109,15 +110,15 @@ export const DisabledItems: Story = {
 
 export const CustomColorsDemo: Story = {
   args: {
-    items: defaultItems,
+    align: 'left',
     menuBg: '#eff6ff', // blue-50
     itemHoverBg: '#dbeafe', // blue-100
     borderColor: '#bfdbfe', // blue-200
     textColor: '#1e3a8a', // blue-900
   },
   render: (args) => (
-    <div className="pb-48">
-      <OverflowMenu {...args} />
+    <div className="p-4 pb-48 flex justify-start">
+      <OverflowMenu {...args} items={defaultItems} />
     </div>
   ),
 };
@@ -130,7 +131,7 @@ export const DarkModeDocs: Story = {
     <div className="dark bg-zinc-950 p-8 rounded-md border border-zinc-800 w-full max-w-sm">
       <div className="flex justify-between items-center pb-48 w-full">
         <span className="text-sm font-semibold text-zinc-400">Data Row Example</span>
-        <OverflowMenu {...args} />
+        <OverflowMenu {...args} items={defaultItems} />
       </div>
     </div>
   ),

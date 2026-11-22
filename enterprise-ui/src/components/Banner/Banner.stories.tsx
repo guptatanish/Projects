@@ -25,12 +25,16 @@ const meta: Meta<BannerStoryArgs> = {
     isDismissible: { control: 'boolean' },
     onClose: { action: 'closed' },
     bannerBg: {
-      control: 'text',
-      description: 'Override banner background class (e.g., bg-purple-600)',
+      control: 'color',
+      description: 'Hex code for custom banner background (e.g., #4f46e5)',
     },
     contentColor: {
-      control: 'text',
-      description: 'Override banner text color class (e.g., text-purple-100)',
+      control: 'color',
+      description: 'Hex code for custom banner text color (e.g., #eef2ff)',
+    },
+    borderColor: {
+      control: 'color',
+      description: 'Hex code for custom banner border color (e.g., #c7d2fe)',
     },
     customActionText: {
       control: 'text',
@@ -53,6 +57,7 @@ export const Default: Story = {
     isDismissible: true,
     bannerBg: '',
     contentColor: '',
+    borderColor: '',
     customActionText: 'Take Action',
     customActionColor: 'bg-black text-white px-3 py-1.5 rounded-sm hover:opacity-80',
     children: 'System maintenance is scheduled for Sunday at 02:00 AM IST. Expect up to 15 minutes of downtime.',
@@ -75,17 +80,18 @@ export const ConfigurableColors: Story = {
   render: () => (
     <div className="flex flex-col w-full gap-4">
       <Banner 
-        variant="default" // The variant is overridden by bannerBg below
-        bannerBg="bg-indigo-600" 
-        contentColor="text-indigo-50"
+        variant="default"
+        bannerBg="#4f46e5" 
+        contentColor="#eef2ff"
+        borderColor="#4338ca"
         isDismissible 
         action={
-          <button className="bg-white text-indigo-900 px-4 py-2 text-xs font-bold shadow-sm hover:bg-indigo-50 focus:outline-none transition-colors">
+          <button className="bg-white text-[#312e81] px-4 py-2 text-xs font-bold rounded-sm shadow-sm hover:opacity-90 focus:outline-none transition-opacity">
             Custom Action
           </button>
         }
       >
-        This banner uses custom bannerBg and contentColor props to completely override the default theme.
+        This banner uses custom hex color props (bannerBg, contentColor, and borderColor) applied via inline styles.
       </Banner>
     </div>
   ),

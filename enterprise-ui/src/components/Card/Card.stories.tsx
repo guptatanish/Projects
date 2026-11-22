@@ -37,10 +37,10 @@ type Story = StoryObj<CardStoryArgs>;
 
 export const Default: Story = {
   args: {
-    variant: 'outline',
-    isInteractive: false,
+    variant: 'elevated',
+    isInteractive: true,
     // explicitly initializing these ensures Storybook controls work
-    cardBg: '',
+    cardBg: '#f4f4f5',
     borderColor: '',
     textColor: '',
   },
@@ -136,6 +136,43 @@ export const InteractiveCards: Story = {
           <CardDescription>Manage your workspace</CardDescription>
         </CardHeader>
       </Card>
+    </div>
+  ),
+};
+
+export const DarkModeDocs: Story = {
+  render: () => (
+    <div
+      style={{ backgroundColor: '#09090b', borderColor: '#27272a', padding: '24px' }}
+      className="dark rounded-md border w-full max-w-2xl"
+    >
+      <div className="text-sm font-semibold text-zinc-400 mb-4">Card (Dark Context)</div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <Card variant="elevated" isInteractive className="w-full">
+          <CardHeader>
+            <CardTitle>Workspace Usage</CardTitle>
+            <CardDescription>Monthly compute quota</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm">74% of allocated build minutes used this cycle.</p>
+          </CardContent>
+          <CardFooter>
+            <button className="px-3.5 py-1.5 text-xs font-medium bg-white text-black rounded-md hover:bg-zinc-200 transition-colors">
+              View Details
+            </button>
+          </CardFooter>
+        </Card>
+
+        <Card variant="outline" className="w-full">
+          <CardHeader>
+            <CardTitle>Security Policy</CardTitle>
+            <CardDescription>SSO &amp; session rules</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm">Enforced across all production environments.</p>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   ),
 };
