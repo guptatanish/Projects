@@ -4,68 +4,101 @@ import { Meta, ColorPalette, ColorItem } from '@storybook/blocks';
 
 # Color Palette
 
-This document outlines the semantic color tokens used across the enterprise component library. These map directly to our Tailwind configuration and CSS variables.
+This document outlines the color tokens and inline color-override conventions used across `enterprise-ui` components and building blocks. Because Tailwind v4 is paired with inline `style` overrides in interactive components and building blocks, custom colors passed via component props (such as `bgColor`, `borderColor`, `textColor`, `mutedTextColor`, `activeColor`, `trackBg`, `indicatorBg`, `menuBg`, `itemHoverBg`, `headerBgColor`, `footerBgColor`, and `backdropColor`) are applied directly via inline styles rather than relying on dynamic Tailwind classes.
+
+## Light Surface & Neutral Tokens
 
 <ColorPalette>
   <ColorItem
-    title="Background & Foreground"
-    subtitle="Core layout tokens"
-    colors={{ 
-      Background: '#ffffff', 
-      Foreground: '#09090b',
-      'Muted Background': '#f4f4f5',
-      'Muted Foreground': '#71717a'
+    title="Light Surfaces & Text"
+    subtitle="Default light-mode backgrounds and ink tokens"
+    colors={{
+      Surface: '#ffffff',
+      Subtle: '#fafafa',
+      Muted: '#f4f4f5',
+      Ink: '#111111',
+      Secondary: '#222222',
+      MutedText: '#666666',
     }}
   />
   <ColorItem
-    title="Primary"
-    subtitle="Brand and active states"
-    colors={{ 
-      Default: '#3b82f6', 
-      Hover: '#2563eb',
-      Foreground: '#ffffff'
+    title="Borders & Inputs"
+    subtitle="Structural borders, dividers, and input surfaces"
+    colors={{
+      Border: '#e5e5e5',
+      Hairline: '#e4e4e7',
+      Input: '#888888',
+      InputBg: '#e5e5e5',
+      ActiveRow: '#f3f4f6',
+      InactiveTrack: '#d4d4d4',
+    }}
+  />
+</ColorPalette>
+
+## Dark Surface & Neutral Tokens
+
+<ColorPalette>
+  <ColorItem
+    title="Dark Surfaces & Text"
+    subtitle="Dark-context panels, cards, and high-contrast text"
+    colors={{
+      DarkCanvas: '#09090b',
+      DarkStage: '#111113',
+      DarkPanel: '#18181b',
+      DarkHeaderFooter: '#1f1f23',
+      DarkHover: '#222226',
+      DarkActive: '#27272a',
+      DarkBorder: '#27272a',
+      DarkBorderStrong: '#3f3f46',
+      DarkText: '#f4f4f5',
+      DarkMutedText: '#a1a1aa',
+    }}
+  />
+</ColorPalette>
+
+## Semantic & Accent Tokens
+
+<ColorPalette>
+  <ColorItem
+    title="Brand & Info"
+    subtitle="Informational states and accent demos"
+    colors={{
+      Info: '#3b82f6',
+      InfoHover: '#2563eb',
+      InfoDark: '#1d4ed8',
+      InfoInk: '#1e3a8a',
+      InfoSoftBg: '#eff6ff',
+      InfoSoftBorder: '#bfdbfe',
+    }}
+  />
+  <ColorItem
+    title="Success"
+    subtitle="Positive confirmations and healthy states"
+    colors={{
+      Success: '#16a34a',
+      SuccessHover: '#15803d',
+      Foreground: '#ffffff',
+    }}
+  />
+  <ColorItem
+    title="Warning & Rating"
+    subtitle="Warnings, highlights, and star ratings"
+    colors={{
+      Warning: '#f59e0b',
+      WarningHover: '#d97706',
+      Foreground: '#ffffff',
     }}
   />
   <ColorItem
     title="Destructive (Error)"
     subtitle="Critical errors and destructive actions"
-    colors={{ 
-      Default: '#ef4444', 
-      Hover: '#dc2626',
-      Foreground: '#ffffff'
-    }}
-  />
-  <ColorItem
-    title="Success"
-    subtitle="Positive confirmations"
-    colors={{ 
-      Default: '#16a34a', 
-      Hover: '#15803d'
-    }}
-  />
-  <ColorItem
-    title="Warning"
-    subtitle="Attention required"
-    colors={{ 
-      Default: '#f59e0b', 
-      Hover: '#d97706'
-    }}
-  />
-  <ColorItem
-    title="Info"
-    subtitle="Neutral informational highlights"
-    colors={{ 
-      Default: '#3b82f6', 
-      Hover: '#2563eb'
-    }}
-  />
-  <ColorItem
-    title="Borders & Inputs"
-    subtitle="Structural dividers"
-    colors={{ 
-      Border: '#e4e4e7',
-      Input: '#888888',
-      'Input Background': '#e5e5e5'
+    colors={{
+      Destructive: '#ef4444',
+      DestructiveBold: '#dc2626',
+      DestructiveSoftBg: '#fef2f2',
+      DestructiveSoftBorder: '#fecaca',
+      DestructiveInk: '#991b1b',
+      Foreground: '#ffffff',
     }}
   />
 </ColorPalette>
