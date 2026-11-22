@@ -32,7 +32,7 @@ const badgeVariants = cva(
   }
 );
 
-export interface BadgeProps extends React.HTMLAttributes<HTMLDivElement>, VariantProps<typeof badgeVariants> {
+export interface BadgeProps extends Omit<React.HTMLAttributes<HTMLDivElement>, 'content'>, VariantProps<typeof badgeVariants> {
   content?: React.ReactNode;
   max?: number;
   showZero?: boolean;

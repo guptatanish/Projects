@@ -76,6 +76,7 @@ export const Chip = React.forwardRef<HTMLDivElement, ChipProps>(
   }, ref) => {
     const isInteractive = !!onClick || selected !== undefined;
     const Component = isInteractive ? 'button' : 'div';
+    const isDisabled = Boolean(disabled);
 
     const customStyle: React.CSSProperties = { ...style };
     if (chipBg) customStyle.backgroundColor = chipBg;
@@ -104,9 +105,9 @@ export const Chip = React.forwardRef<HTMLDivElement, ChipProps>(
         onClick={onClick as any}
         style={customStyle}
         aria-pressed={selected}
-        aria-disabled={disabled}
+        aria-disabled={isDisabled}
         className={cn(
-          chipVariants({ variant, size, disabled, isInteractive }),
+          chipVariants({ variant, size, disabled: isDisabled, isInteractive }),
           
           selected && !chipBg && variant === 'soft' && "bg-black text-white dark:bg-white dark:text-black",
           selected && !chipBg && variant === 'outline' && "bg-black text-white dark:bg-white dark:text-black",
@@ -137,7 +138,7 @@ export const Chip = React.forwardRef<HTMLDivElement, ChipProps>(
           <button
             type="button"
             aria-label="Remove"
-            disabled={disabled}
+            disabled={isDisabled}
             onClick={(e) => {
               e.stopPropagation(); 
               onDelete(e);

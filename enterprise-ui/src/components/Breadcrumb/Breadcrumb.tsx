@@ -80,12 +80,13 @@ export const BreadcrumbLink = React.forwardRef<HTMLAnchorElement, BreadcrumbLink
     );
     
     if (asChild && React.isValidElement(children)) {
-      return React.cloneElement(children as React.ReactElement, {
+      const childElement = children as React.ReactElement<React.HTMLAttributes<HTMLElement>>;
+      return React.cloneElement(childElement, {
         ...props,
-        style: { ...customStyle, ...(children.props.style || {}) },
-        className: cn(combinedClassName, (children.props as any).className),
+        style: { ...customStyle, ...(childElement.props.style || {}) },
+        className: cn(combinedClassName, childElement.props.className),
         ref,
-      });
+      } as React.HTMLAttributes<HTMLElement> & { ref?: React.Ref<HTMLAnchorElement> });
     }
 
     return (

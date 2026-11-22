@@ -38,7 +38,7 @@ const iconSizes = {
   large: "w-4 h-4",
 };
 
-export interface CheckboxProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'onChange' | 'value'>, VariantProps<typeof checkboxVariants> {
+export interface CheckboxProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'onChange' | 'value' | 'defaultChecked'>, VariantProps<typeof checkboxVariants> {
   checked?: boolean | 'indeterminate';
   defaultChecked?: boolean | 'indeterminate';
   onCheckedChange?: (checked: boolean) => void;

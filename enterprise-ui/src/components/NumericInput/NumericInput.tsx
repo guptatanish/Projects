@@ -39,7 +39,7 @@ const wrapperVariants = cva(
   }
 );
 
-export interface NumericInputProps extends Omit<React.HTMLAttributes<HTMLDivElement>, 'onChange'>, VariantProps<typeof wrapperVariants> {
+export interface NumericInputProps extends Omit<React.HTMLAttributes<HTMLDivElement>, 'onChange' | 'prefix'>, VariantProps<typeof wrapperVariants> {
   value?: number;
   onValueChange?: (value: number | undefined) => void;
   min?: number;

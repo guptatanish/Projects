@@ -136,7 +136,7 @@ export const SlideIndicator = React.forwardRef<HTMLDivElement, SlideIndicatorPro
       onChange?.(clamped);
     };
 
-    const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>, idx: number) => {
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLElement>, idx: number) => {
       if (!interactive) return;
       const nextKey = resolvedOrientation === 'vertical' ? 'ArrowDown' : 'ArrowRight';
       const prevKey = resolvedOrientation === 'vertical' ? 'ArrowUp' : 'ArrowLeft';
