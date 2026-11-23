@@ -1,7 +1,23 @@
-// Phase 1 Types — Aligned with FastAPI backend schemas (`app/schemas/chat.py` & `app/core/errors.py`)
+// Phase 2 Types — Aligned with FastAPI backend (`POST /api/chat` with Gemini Flash & `app/core/errors.py`)
 
 // Who sent a message in the chat screen: 'user' (you) or 'assistant' (the chatbot)
 export type MessageSenderRole = 'user' | 'assistant';
+
+// Known error codes returned by the backend or created on the frontend network layer
+export type KnownApiErrorCode =
+  | 'VALIDATION_ERROR'
+  | 'RATE_LIMIT_EXCEEDED'
+  | 'AI_UNAVAILABLE'
+  | 'AI_TIMEOUT'
+  | 'AI_PROVIDER_ERROR'
+  | 'AI_EMPTY_RESPONSE'
+  | 'AI_CONFIG_MISSING'
+  | 'INTERNAL_SERVER_ERROR'
+  | 'NOT_FOUND'
+  | 'METHOD_NOT_ALLOWED'
+  | 'NETWORK_ERROR'
+  | 'INVALID_RESPONSE'
+  | 'HTTP_ERROR';
 
 // What the frontend sends in the JSON body of POST /api/chat
 export interface ChatRequestPayload {
@@ -24,9 +40,9 @@ export interface HealthCheckResponse {
   phase: number;
 }
 
-// The inner error details returned by FastAPI when something fails (e.g., 422, 404, 500)
+// The inner error details returned by FastAPI when something fails
 export interface ApiErrorDetail {
-  code: string;
+  code: KnownApiErrorCode | string;
   message: string;
 }
 
