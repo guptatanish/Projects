@@ -18,7 +18,8 @@ class Settings(BaseSettings):
     api_v1_prefix: str = "/api"
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-3.8-flash"
+    gemini_model: str = "gemini-3.5-flash-lite"
+    database_url: str = "postgresql+psycopg://postgres:postgres@127.0.0.1:5432/ai_chat_bot"
 
     @field_validator("api_v1_prefix")
     @classmethod
@@ -29,7 +30,7 @@ class Settings(BaseSettings):
             cleaned = f"/{cleaned}"
         return cleaned.rstrip("/") or "/api"
 
-    @field_validator("gemini_api_key", "gemini_model", mode="before")
+    @field_validator("gemini_api_key", "gemini_model", "database_url", mode="before")
     @classmethod
     def strip_string_config(cls, value: object) -> object:
         """Trim accidental whitespace around string environment settings."""
