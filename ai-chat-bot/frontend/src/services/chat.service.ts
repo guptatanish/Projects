@@ -1,4 +1,4 @@
-// Phase 2 Chat Service — Talks to FastAPI Gemini Flash endpoint at http://127.0.0.1:8000/api
+// Phase 3 Chat Service — Talks to FastAPI POST /api/chat with optional `conversation_id` for multi-turn memory
 
 import type {
   ApiErrorResponse,
@@ -58,6 +58,15 @@ function buildHttpChatError(response: Response, parsedBody: unknown): ChatApiErr
   }
 
   // Fallback mapping if an HTTP error status arrives without the standard `{ error }` wrapper
+  if (response.status === 404) {
+    return new ChatApiError(
+      'CONVERSATION_NOT_FOUND',
+      'Conversation was not found on the server.',
+      404,
+      false
+    );
+  }
+
   if (response.status === 429) {
     return new ChatApiError(
       'RATE_LIMIT_EXCEEDED',
@@ -129,9 +138,10 @@ export async function checkBackendHealth(signal?: AbortSignal): Promise<HealthCh
   return parsedBody as HealthCheckResponse;
 }
 
-// Sends a user's message to POST /api/chat and returns the Gemini Flash ChatResponsePayload
+// Sends a user's message to POST /api/chat (with optional `conversationId`) and returns Phase 3 ChatResponsePayload
 export async function sendChatMessage(
   messageText: string,
+  conversationId?: number,
   signal?: AbortSignal
 ): Promise<ChatResponsePayload> {
   // Trim leading/trailing spaces before sending so pure spaces are caught cleanly
@@ -149,6 +159,11 @@ export async function sendChatMessage(
   const requestBody: ChatRequestPayload = {
     message: trimmedMessage,
   };
+
+  // Only include `conversation_id` when we have a valid positive integer conversation ID
+  if (typeof conversationId === 'number' && Number.isInteger(conversationId) && conversationId > 0) {
+    requestBody.conversation_id = conversationId;
+  }
 
   let response: Response;
 
@@ -182,22 +197,28 @@ export async function sendChatMessage(
     parsedBody = null;
   }
 
-  // Any HTTP status outside 200–299 (like 422, 429, 500, 502, 503, 504) is converted into a ChatApiError
+  // Any HTTP status outside 200–299 is converted into a ChatApiError
   if (!response.ok) {
     throw buildHttpChatError(response, parsedBody);
   }
 
   const data = parsedBody as Partial<ChatResponsePayload>;
-  if (typeof data?.reply !== 'string') {
+  if (
+    typeof data?.reply !== 'string' ||
+    typeof data?.conversation_id !== 'number' ||
+    typeof data?.message_id !== 'number'
+  ) {
     throw new ChatApiError(
       'INVALID_RESPONSE',
-      'Backend returned an unexpected response format.',
+      'Backend returned an unexpected Phase 3 chat response format.',
       response.status,
       false
     );
   }
 
   return {
+    conversation_id: data.conversation_id,
+    message_id: data.message_id,
     reply: data.reply,
     role: 'assistant',
     mode: typeof data.mode === 'string' ? data.mode : 'gemini_flash',
