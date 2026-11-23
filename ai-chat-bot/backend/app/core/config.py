@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     app_env: str = "development"
     api_v1_prefix: str = "/api"
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-3.8-flash"
 
     @field_validator("api_v1_prefix")
     @classmethod
@@ -26,6 +28,14 @@ class Settings(BaseSettings):
         if not cleaned.startswith("/"):
             cleaned = f"/{cleaned}"
         return cleaned.rstrip("/") or "/api"
+
+    @field_validator("gemini_api_key", "gemini_model", mode="before")
+    @classmethod
+    def strip_string_config(cls, value: object) -> object:
+        """Trim accidental whitespace around string environment settings."""
+        if isinstance(value, str):
+            return value.strip()
+        return value
 
     @property
     def cors_origins_list(self) -> list[str]:
