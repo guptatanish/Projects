@@ -33,7 +33,7 @@ def create_app() -> FastAPI:
                 "status": "ok",
                 "service": settings.app_name,
                 "environment": settings.app_env,
-                "phase": 3,
+                "phase": 4,
             }
         )
 

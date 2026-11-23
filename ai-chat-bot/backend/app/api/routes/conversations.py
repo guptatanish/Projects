@@ -55,7 +55,7 @@ def get_conversation(
     conversation_id: int,
     db: Session = Depends(get_db),
 ) -> ConversationDetailResponse:
-    """Fetch a single conversation along with its chronological messages."""
+    """Fetch a single conversation along with its chronological messages and attachments."""
     conversation = conversation_service.get_conversation_by_id(
         db,
         conversation_id,
