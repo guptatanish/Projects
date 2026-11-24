@@ -1,13 +1,21 @@
-// Phase 4 Types — Aligned with FastAPI backend (`POST /api/chat` attachments & rate limiting, `/api/conversations`)
+// Phase 5 Types — Aligned with FastAPI backend (`/api/auth/*`, `/api/conversations`, `POST /api/chat` JSON & FormData)
 
 // Who sent a message in the chat screen: 'user' (you) or 'assistant' (the chatbot)
 export type MessageSenderRole = 'user' | 'assistant';
 
-// Supported image MIME types accepted by backend Phase 4
+// Supported image MIME types accepted by backend Phase 5 (JPEG, PNG, WebP)
 export type SupportedImageMimeType = 'image/jpeg' | 'image/png' | 'image/webp';
+
+// Scope/topic filter options for personal profile knowledge exploration
+export type ProfileScopeFilter = 'all' | 'git' | 'work' | 'stack' | 'education';
+
+// User feedback rating on an assistant response
+export type MessageRating = 'up' | 'down' | null;
 
 // Known error codes returned by the backend or created on the frontend network layer
 export type KnownApiErrorCode =
+  | 'UNAUTHORIZED'
+  | 'FORBIDDEN'
   | 'VALIDATION_ERROR'
   | 'CONVERSATION_NOT_FOUND'
   | 'RATE_LIMIT_EXCEEDED'
@@ -26,13 +34,49 @@ export type KnownApiErrorCode =
   | 'INVALID_RESPONSE'
   | 'HTTP_ERROR';
 
-// Image attachment state held in the UI composer before sending
+// Authenticated user profile inside AuthSessionResponse (`user` object)
+export interface AuthUser {
+  id: number | string;
+  email: string;
+  full_name: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+// Session response envelope returned by GET /api/auth/me, POST /api/auth/login, POST /api/auth/register
+export interface AuthSessionResponse {
+  authenticated: boolean;
+  user: AuthUser;
+}
+
+// Payload for POST /api/auth/login
+export interface LoginPayload {
+  email: string;
+  password: string;
+}
+
+// Payload for POST /api/auth/register (`full_name` required, 1-120 chars; `password` min 8 chars)
+export interface RegisterPayload {
+  email: string;
+  full_name: string;
+  password: string;
+}
+
+// Response shape for POST /api/auth/logout
+export interface LogoutResponse {
+  authenticated?: boolean;
+  detail?: string;
+  message?: string;
+}
+
+// Image attachment state held in the UI composer before sending (supports File for FormData + base64 fallback)
 export interface PendingImageAttachment {
+  file?: File | null;
   fileName: string;
   mimeType: SupportedImageMimeType;
   fileSize: number; // Original file byte size
   base64: string; // Base64 string (without data: URL prefix)
-  previewUrl: string; // Data URL or object URL for thumbnail preview in the composer
+  previewUrl: string; // Data URL or object URL for thumbnail preview
 }
 
 // Persisted attachment metadata returned inside MessageResponse (`GET /api/conversations/{id}`)
@@ -78,11 +122,18 @@ export interface ConversationSummary {
   title: string;
   created_at: string;
   updated_at: string;
+  is_pinned?: boolean;
 }
 
 // Optional request body when explicitly creating a new conversation via POST /api/conversations
 export interface CreateConversationPayload {
   title?: string;
+}
+
+// Request body for PATCH /api/conversations/{conversation_id}
+export interface RenameConversationPayload {
+  title?: string;
+  is_pinned?: boolean;
 }
 
 // A single message row persisted in PostgreSQL and returned inside GET /api/conversations/{id}
@@ -123,4 +174,5 @@ export interface ChatMessageItem {
   mode?: string;
   model?: string | null;
   attachments?: AttachmentMetadata[];
+  rating?: MessageRating;
 }

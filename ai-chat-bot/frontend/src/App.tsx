@@ -1,4 +1,4 @@
-// Phase 1 Root Component — Renders the main ChatPage view
+// Phase 5 Root Component — Renders the main ChatPage view
 
 import { ChatPage } from './components/ChatPage';
 

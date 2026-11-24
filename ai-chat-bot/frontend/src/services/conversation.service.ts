@@ -1,4 +1,4 @@
-// Phase 4 Conversation Service — Talks to FastAPI `/api/conversations` & preserves message attachment metadata
+// Phase 5 Conversation Service — Talks to FastAPI `/api/conversations` with auth cookies, 401/403, PATCH rename & attachments
 
 import type {
   ApiErrorResponse,
@@ -7,6 +7,7 @@ import type {
   ConversationSummary,
   CreateConversationPayload,
   PersistedMessageItem,
+  RenameConversationPayload,
 } from '../types/chat';
 import { ChatApiError } from './chat.service';
 
@@ -40,6 +41,24 @@ async function throwForFailedResponse(response: Response): Promise<never> {
     );
   }
 
+  if (response.status === 401) {
+    throw new ChatApiError(
+      'UNAUTHORIZED',
+      'Your session has expired or you are not logged in. Please sign in again.',
+      401,
+      false
+    );
+  }
+
+  if (response.status === 403) {
+    throw new ChatApiError(
+      'FORBIDDEN',
+      'You do not have permission to access or modify this conversation.',
+      403,
+      false
+    );
+  }
+
   if (response.status === 404) {
     throw new ChatApiError(
       'CONVERSATION_NOT_FOUND',
@@ -69,7 +88,7 @@ export function formatMessageTimestamp(isoString: string): string {
   });
 }
 
-// Converts a persisted PostgreSQL message row (including Phase 4 `attachments`) into `ChatMessageItem`
+// Converts a persisted PostgreSQL message row (including Phase 4/5 `attachments`) into `ChatMessageItem`
 export function mapPersistedMessageToItem(msg: PersistedMessageItem): ChatMessageItem {
   return {
     id: `db-msg-${msg.id}`,
@@ -83,7 +102,7 @@ export function mapPersistedMessageToItem(msg: PersistedMessageItem): ChatMessag
   };
 }
 
-// GET /api/conversations?limit=50 — Fetches conversations ordered by most recently updated
+// GET /api/conversations?limit=50 — Fetches conversations scoped to the authenticated user
 export async function listConversations(
   limit = 50,
   signal?: AbortSignal
@@ -159,6 +178,65 @@ export async function createConversation(
   }
 
   return (await response.json()) as ConversationSummary;
+}
+
+// PATCH /api/conversations/{conversation_id} — Updates conversation title (and optional is_pinned)
+export async function updateConversation(
+  conversationId: number,
+  payload: RenameConversationPayload,
+  signal?: AbortSignal
+): Promise<ConversationSummary> {
+  const body: RenameConversationPayload = {};
+  if (typeof payload.title === 'string') {
+    const trimmed = payload.title.trim();
+    if (!trimmed) {
+      throw new ChatApiError(
+        'VALIDATION_ERROR',
+        'title: Conversation title cannot be empty.',
+        422,
+        false
+      );
+    }
+    body.title = trimmed.slice(0, 200);
+  }
+  if (typeof payload.is_pinned === 'boolean') {
+    body.is_pinned = payload.is_pinned;
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}/conversations/${conversationId}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      credentials: 'include',
+      body: JSON.stringify(body),
+      signal,
+    });
+  } catch (err) {
+    if ((err as Error)?.name === 'AbortError') throw err;
+    throw new ChatApiError(
+      'NETWORK_ERROR',
+      'Unable to update conversation on the backend.',
+      0,
+      true
+    );
+  }
+
+  if (!response.ok) {
+    await throwForFailedResponse(response);
+  }
+
+  return (await response.json()) as ConversationSummary;
+}
+
+export async function renameConversation(
+  conversationId: number,
+  title: string,
+  signal?: AbortSignal
+): Promise<ConversationSummary> {
+  return updateConversation(conversationId, { title }, signal);
 }
 
 // GET /api/conversations/{conversation_id} — Fetches conversation details + persisted messages & attachments

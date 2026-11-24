@@ -1,10 +1,12 @@
-// Phase 4 Message Bubble — Renders user & assistant turns, Markdown formatting, and attachment metadata
+// Phase 5 Message Bubble — Markdown formatting, single-hero structured widgets, attachments, copy & answer rating
 
 import { Fragment, useState, type ReactNode } from 'react';
-import type { AttachmentMetadata, ChatMessageItem } from '../types/chat';
+import type { AttachmentMetadata, ChatMessageItem, MessageRating } from '../types/chat';
 
 interface MessageBubbleProps {
   message: ChatMessageItem;
+  onRate?: (messageId: string, rating: MessageRating) => void;
+  onCopySuccess?: (label: string) => void;
 }
 
 function formatAttachmentBytes(bytes: number): string {
@@ -143,6 +145,92 @@ function MarkdownContent({ content }: { content: string }) {
   return <div className="text-sm text-slate-800">{elements}</div>;
 }
 
+// Extracts structured key/value rows when an assistant answer contains bulleted or `Key: Value` lines
+function extractStructuredRows(content: string): { label: string; detail: string }[] {
+  const rows: { label: string; detail: string }[] = [];
+  const lines = content.replace(/\r\n/g, '\n').split('\n');
+
+  for (const rawLine of lines) {
+    const cleaned = rawLine.trim().replace(/^[-*•]\s+|\d+\.\s+/, '');
+    const boldKv = cleaned.match(/^\*\*([^*]+)\*\*[:\s-]+(.+)$/);
+    if (boldKv) {
+      rows.push({
+        label: boldKv[1].trim(),
+        detail: boldKv[2].replace(/\*\*/g, '').trim(),
+      });
+      continue;
+    }
+
+    const plainKv = cleaned.match(/^([A-Za-z0-9 /_-]{2,36}):\s+(.+)$/);
+    if (plainKv) {
+      rows.push({
+        label: plainKv[1].trim(),
+        detail: plainKv[2].replace(/\*\*/g, '').trim(),
+      });
+    }
+  }
+
+  return rows.slice(0, 6);
+}
+
+// Single-hero structured widget (Card / Data Table / Collapsible) for structured profile answers
+function SingleHeroProfileCard({ content }: { content: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const rows = extractStructuredRows(content);
+  const hasTabularStructure = rows.length >= 2;
+
+  return (
+    <div className="mt-3 rounded-xl border border-slate-200 bg-white overflow-hidden">
+      <div className="px-3 py-2 bg-slate-100/80 border-b border-slate-200/80 flex items-center justify-between gap-2">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-700">
+          {hasTabularStructure ? 'Structured Profile Summary (Table Card)' : 'Profile Highlights Card'}
+        </span>
+
+        <button
+          type="button"
+          onClick={() => setExpanded((prev) => !prev)}
+          className="text-[11px] font-medium text-indigo-700 hover:text-indigo-900 cursor-pointer"
+        >
+          {expanded ? 'Collapse' : 'Expand'}
+        </button>
+      </div>
+
+      {hasTabularStructure ? (
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse text-xs">
+            <thead>
+              <tr className="border-b border-slate-200 bg-slate-50/60 text-slate-500">
+                <th className="py-1.5 px-3 font-semibold">Topic</th>
+                <th className="py-1.5 px-3 font-semibold">Details</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 text-slate-800">
+              {rows.map((row, idx) => (
+                <tr key={idx}>
+                  <td className="py-1.5 px-3 font-medium text-slate-900 align-top whitespace-nowrap">
+                    {row.label}
+                  </td>
+                  <td className="py-1.5 px-3 align-top">
+                    {expanded ? row.detail : row.detail.length > 140 ? `${row.detail.slice(0, 140)}...` : row.detail}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="px-3 py-2.5 text-xs text-slate-700">
+          {expanded
+            ? content.trim()
+            : content.trim().length > 220
+              ? `${content.trim().slice(0, 220)}...`
+              : content.trim()}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AttachmentChips({
   attachments,
   isUser,
@@ -164,11 +252,7 @@ function AttachmentChips({
           }`}
         >
           <span className="font-medium truncate max-w-48">{att.file_name}</span>
-          <span
-            className={
-              isUser ? 'text-slate-300' : 'text-slate-400'
-            }
-          >
+          <span className={isUser ? 'text-slate-300' : 'text-slate-400'}>
             {att.mime_type} • {formatAttachmentBytes(att.file_size)}
           </span>
         </div>
@@ -177,19 +261,29 @@ function AttachmentChips({
   );
 }
 
-export function MessageBubble({ message }: MessageBubbleProps) {
+export function MessageBubble({ message, onRate, onCopySuccess }: MessageBubbleProps) {
   const isUser = message.role === 'user';
   const [copied, setCopied] = useState(false);
+  const currentRating: MessageRating = message.rating ?? null;
 
   const handleCopy = async () => {
     try {
       await navigator.clipboard.writeText(message.text);
       setCopied(true);
+      onCopySuccess?.('Response copied to clipboard');
       window.setTimeout(() => setCopied(false), 1800);
     } catch {
-      // Clipboard may be blocked in non-HTTPS contexts; fail silently
+      // Clipboard may be blocked in non-HTTPS contexts
     }
   };
+
+  const handleRatingClick = (next: 'up' | 'down') => {
+    const toggled: MessageRating = currentRating === next ? null : next;
+    onRate?.(message.id, toggled);
+  };
+
+  const shouldRenderHeroWidget =
+    !isUser && (message.text.length > 180 || extractStructuredRows(message.text).length >= 2);
 
   return (
     <div className={`flex items-start gap-3 ${isUser ? 'justify-end' : 'justify-start'}`}>
@@ -236,19 +330,55 @@ export function MessageBubble({ message }: MessageBubbleProps) {
               : 'bg-slate-50 border border-slate-200/90 text-slate-800'
           }`}
         >
-          {isUser ? message.text : <MarkdownContent content={message.text} />}
+          {isUser ? (
+            message.text
+          ) : (
+            <>
+              <MarkdownContent content={message.text} />
+              {shouldRenderHeroWidget && <SingleHeroProfileCard content={message.text} />}
+            </>
+          )}
         </div>
 
-        {/* Assistant Footer Actions (Copy) */}
+        {/* Assistant Footer Actions: Copy + Answer Rating */}
         {!isUser && (
-          <div className="mt-1 px-1 flex items-center gap-2">
+          <div className="mt-1.5 px-1 flex items-center gap-3 text-[11px] text-slate-400">
             <button
               type="button"
               onClick={() => void handleCopy()}
-              className="text-[11px] text-slate-400 hover:text-slate-700 transition-colors cursor-pointer"
+              className="hover:text-slate-700 transition-colors cursor-pointer"
             >
               {copied ? 'Copied' : 'Copy'}
             </button>
+
+            <span aria-hidden="true">•</span>
+
+            <div className="inline-flex items-center gap-1.5" role="group" aria-label="Rate response">
+              <button
+                type="button"
+                aria-pressed={currentRating === 'up'}
+                onClick={() => handleRatingClick('up')}
+                className={`px-1.5 py-0.5 rounded transition-colors cursor-pointer ${
+                  currentRating === 'up'
+                    ? 'bg-emerald-100 text-emerald-800 font-semibold'
+                    : 'hover:text-slate-700'
+                }`}
+              >
+                Helpful
+              </button>
+              <button
+                type="button"
+                aria-pressed={currentRating === 'down'}
+                onClick={() => handleRatingClick('down')}
+                className={`px-1.5 py-0.5 rounded transition-colors cursor-pointer ${
+                  currentRating === 'down'
+                    ? 'bg-rose-100 text-rose-800 font-semibold'
+                    : 'hover:text-slate-700'
+                }`}
+              >
+                Needs work
+              </button>
+            </div>
           </div>
         )}
       </div>

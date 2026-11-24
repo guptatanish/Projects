@@ -1,6 +1,6 @@
-// Phase 3 Conversation Sidebar — Displays persisted PostgreSQL threads with New Chat, search, switch, and delete
+// Phase 5 Conversation Sidebar — Search, Pin, Rename (PATCH), Delete Confirmation Dialog & Responsive Side Nav / Drawer
 
-import { useState } from 'react';
+import { useEffect, useState, type KeyboardEvent } from 'react';
 import type { ConversationSummary } from '../types/chat';
 
 interface ConversationSidebarProps {
@@ -8,10 +8,14 @@ interface ConversationSidebarProps {
   activeConversationId: number | null; // Currently selected conversation ID in PostgreSQL
   isLoadingList: boolean; // True while fetching the conversation list
   deletingId: number | null; // ID of conversation currently being deleted via DELETE /api/conversations/{id}
+  renamingId?: number | null; // ID of conversation currently being renamed via PATCH /api/conversations/{id}
+  isMobileDrawer?: boolean; // Renders as a mobile overlay drawer when true
   onSelectConversation: (conversationId: number) => void; // Switches to a saved thread
   onNewChat: () => void; // Starts a new conversation
+  onRenameConversation: (conversationId: number, nextTitle: string) => Promise<void> | void; // Calls PATCH /api/conversations/{id}
+  onTogglePinConversation: (conversationId: number) => void; // Toggles pin state for a conversation
   onDeleteConversation: (conversationId: number) => void; // Deletes a thread and cascades messages
-  onCollapse: () => void; // Collapses the sidebar
+  onCollapse: () => void; // Collapses the sidebar or closes mobile drawer
 }
 
 // Formats ISO `updated_at` from PostgreSQL into a compact label (e.g. "02:39 AM" or "Nov 24")
@@ -45,22 +49,81 @@ export function ConversationSidebar({
   activeConversationId,
   isLoadingList,
   deletingId,
+  renamingId = null,
+  isMobileDrawer = false,
   onSelectConversation,
   onNewChat,
+  onRenameConversation,
+  onTogglePinConversation,
   onDeleteConversation,
   onCollapse,
 }: ConversationSidebarProps) {
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [draftTitle, setDraftTitle] = useState<string>('');
+  const [pendingDeleteConv, setPendingDeleteConv] = useState<ConversationSummary | null>(null);
+
+  useEffect(() => {
+    if (!pendingDeleteConv) return;
+    const onKeyDown = (e: globalThis.KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setPendingDeleteConv(null);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [pendingDeleteConv]);
 
   const trimmedQuery = searchQuery.trim().toLowerCase();
-  const filteredConversations = trimmedQuery
-    ? conversations.filter((conv) => conv.title.toLowerCase().includes(trimmedQuery))
-    : conversations;
+  const filteredConversations = (
+    trimmedQuery
+      ? conversations.filter((conv) =>
+          (conv.title || `Conversation #${conv.id}`).toLowerCase().includes(trimmedQuery)
+        )
+      : conversations
+  ).slice().sort((a, b) => {
+    const pinDiff = Number(Boolean(b.is_pinned)) - Number(Boolean(a.is_pinned));
+    if (pinDiff !== 0) return pinDiff;
+    return 0;
+  });
 
-  return (
-    <aside className="w-72 shrink-0 border-r border-slate-200 bg-slate-50/80 flex flex-col justify-between p-3 h-full">
+  const startEditing = (conv: ConversationSummary) => {
+    setEditingId(conv.id);
+    setDraftTitle(conv.title || `Conversation #${conv.id}`);
+  };
+
+  const cancelEditing = () => {
+    setEditingId(null);
+    setDraftTitle('');
+  };
+
+  const commitRename = async (conversationId: number) => {
+    const cleanTitle = draftTitle.trim();
+    if (!cleanTitle) {
+      cancelEditing();
+      return;
+    }
+    setEditingId(null);
+    await onRenameConversation(conversationId, cleanTitle);
+  };
+
+  const handleRenameKeyDown = (e: KeyboardEvent<HTMLInputElement>, conversationId: number) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      void commitRename(conversationId);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      cancelEditing();
+    }
+  };
+
+  const sidebarContent = (
+    <aside
+      aria-label="Conversation navigation"
+      className="w-72 shrink-0 border-r border-slate-200 bg-slate-50/95 flex flex-col justify-between p-3 h-full"
+    >
       <div className="flex flex-col gap-3 min-h-0 flex-1">
-        {/* Top Actions: + New Chat & Hide */}
+        {/* Top Actions: + New Chat & Hide/Close */}
         <div className="flex items-center justify-between gap-2">
           <button
             type="button"
@@ -73,10 +136,10 @@ export function ConversationSidebar({
           <button
             type="button"
             onClick={onCollapse}
-            title="Collapse sidebar"
+            title={isMobileDrawer ? 'Close drawer' : 'Collapse sidebar'}
             className="px-2.5 py-2 rounded-xl border border-slate-200 bg-white text-xs font-medium text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
           >
-            Hide
+            {isMobileDrawer ? 'Close' : 'Hide'}
           </button>
         </div>
 
@@ -94,9 +157,9 @@ export function ConversationSidebar({
         <div className="flex-1 overflow-y-auto space-y-1.5 pr-0.5">
           {isLoadingList && conversations.length === 0 ? (
             <div className="space-y-2 px-1 py-2">
-              <div className="h-11 rounded-xl bg-slate-200/70 animate-pulse" />
-              <div className="h-11 rounded-xl bg-slate-200/70 animate-pulse" />
-              <div className="h-11 rounded-xl bg-slate-200/70 animate-pulse" />
+              <div className="h-12 rounded-xl bg-slate-200/70 animate-pulse" />
+              <div className="h-12 rounded-xl bg-slate-200/70 animate-pulse" />
+              <div className="h-12 rounded-xl bg-slate-200/70 animate-pulse" />
             </div>
           ) : filteredConversations.length === 0 ? (
             <p className="text-xs text-slate-400 px-2 py-6 text-center">
@@ -106,50 +169,99 @@ export function ConversationSidebar({
             filteredConversations.map((conv) => {
               const isActive = conv.id === activeConversationId;
               const isDeleting = deletingId === conv.id;
+              const isRenaming = renamingId === conv.id;
+              const isEditing = editingId === conv.id;
 
               return (
                 <div
                   key={conv.id}
                   onClick={() => {
-                    if (!isDeleting) {
+                    if (!isDeleting && !isEditing) {
                       onSelectConversation(conv.id);
                     }
                   }}
                   role="button"
                   tabIndex={0}
                   onKeyDown={(e) => {
-                    if ((e.key === 'Enter' || e.key === ' ') && !isDeleting) {
+                    if ((e.key === 'Enter' || e.key === ' ') && !isDeleting && !isEditing) {
                       e.preventDefault();
                       onSelectConversation(conv.id);
                     }
                   }}
-                  className={`group flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl text-xs cursor-pointer transition-colors ${
+                  className={`group flex flex-col gap-1.5 px-3 py-2.5 rounded-xl text-xs cursor-pointer transition-colors ${
                     isActive
                       ? 'bg-white border border-slate-200 text-slate-900 font-medium shadow-2xs'
-                      : 'text-slate-600 hover:bg-slate-100 border border-transparent'
+                      : 'text-slate-700 hover:bg-slate-100 border border-transparent'
                   }`}
                 >
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate">{conv.title || `Conversation #${conv.id}`}</p>
-                    <p className="text-[11px] text-slate-400 mt-0.5 font-normal">
-                      {formatUpdatedLabel(conv.updated_at)}
-                    </p>
+                  <div className="flex items-start justify-between gap-2 min-w-0">
+                    <div className="min-w-0 flex-1">
+                      {isEditing ? (
+                        <input
+                          type="text"
+                          value={draftTitle}
+                          maxLength={200}
+                          autoFocus
+                          aria-label="Rename conversation"
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={(e) => setDraftTitle(e.target.value)}
+                          onKeyDown={(e) => handleRenameKeyDown(e, conv.id)}
+                          onBlur={() => void commitRename(conv.id)}
+                          className="w-full px-2 py-1 rounded border border-slate-300 bg-white text-xs text-slate-900 focus:outline-none focus:border-slate-500"
+                        />
+                      ) : (
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          {conv.is_pinned && (
+                            <span className="px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 text-[10px] font-semibold shrink-0">
+                              Pinned
+                            </span>
+                          )}
+                          <p className="truncate">
+                            {isRenaming
+                              ? 'Renaming...'
+                              : conv.title || `Conversation #${conv.id}`}
+                          </p>
+                        </div>
+                      )}
+
+                      <p className="text-[11px] text-slate-400 mt-0.5 font-normal">
+                        {formatUpdatedLabel(conv.updated_at)}
+                      </p>
+                    </div>
                   </div>
 
-                  <button
-                    type="button"
-                    disabled={isDeleting}
-                    onClick={(e) => {
-                      // Prevent triggering `onSelectConversation` on the parent row when deleting
-                      e.stopPropagation();
-                      onDeleteConversation(conv.id);
-                    }}
-                    title="Delete conversation"
-                    aria-label={`Delete conversation ${conv.title}`}
-                    className="opacity-70 group-hover:opacity-100 disabled:opacity-40 px-2 py-1 rounded-md text-[11px] text-slate-500 hover:text-rose-700 hover:bg-rose-50 transition-all cursor-pointer shrink-0"
+                  {/* Row Actions: Pin, Rename, Delete */}
+                  <div
+                    className="flex items-center justify-end gap-1.5 pt-0.5 opacity-80 group-hover:opacity-100 transition-opacity"
+                    onClick={(e) => e.stopPropagation()}
                   >
-                    {isDeleting ? '...' : 'Delete'}
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => onTogglePinConversation(conv.id)}
+                      className="px-1.5 py-0.5 rounded text-[11px] text-slate-500 hover:text-slate-900 hover:bg-slate-200/70 transition-colors cursor-pointer"
+                    >
+                      {conv.is_pinned ? 'Unpin' : 'Pin'}
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={isDeleting || isRenaming}
+                      onClick={() => startEditing(conv)}
+                      className="px-1.5 py-0.5 rounded text-[11px] text-slate-500 hover:text-slate-900 hover:bg-slate-200/70 disabled:opacity-40 transition-colors cursor-pointer"
+                    >
+                      Rename
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={isDeleting}
+                      onClick={() => setPendingDeleteConv(conv)}
+                      aria-label={`Delete conversation ${conv.title}`}
+                      className="px-1.5 py-0.5 rounded text-[11px] text-slate-500 hover:text-rose-700 hover:bg-rose-50 disabled:opacity-40 transition-colors cursor-pointer"
+                    >
+                      {isDeleting ? '...' : 'Delete'}
+                    </button>
+                  </div>
                 </div>
               );
             })
@@ -160,10 +272,76 @@ export function ConversationSidebar({
       {/* Footer Persistence Badge */}
       <div className="pt-3 mt-2 border-t border-slate-200 text-[11px] text-slate-500 flex items-center justify-between">
         <span>PostgreSQL History</span>
-        <span className="px-2 py-0.5 rounded-full bg-emerald-100/80 text-emerald-800 font-medium">
-          Phase 3
+        <span className="px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 font-medium">
+          Phase 5
         </span>
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      {pendingDeleteConv && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-conv-dialog-title"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4"
+          onClick={() => setPendingDeleteConv(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-5 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2
+              id="delete-conv-dialog-title"
+              className="text-sm font-semibold text-slate-900"
+            >
+              Delete conversation?
+            </h2>
+            <p className="mt-1.5 text-xs text-slate-600 leading-relaxed">
+              This will permanently remove{' '}
+              <span className="font-medium text-slate-900">
+                "{pendingDeleteConv.title || `Conversation #${pendingDeleteConv.id}`}"
+              </span>{' '}
+              and all its persisted messages.
+            </p>
+
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setPendingDeleteConv(null)}
+                className="px-3 py-1.5 rounded-xl border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-100 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const targetId = pendingDeleteConv.id;
+                  setPendingDeleteConv(null);
+                  onDeleteConversation(targetId);
+                }}
+                className="px-3 py-1.5 rounded-xl bg-rose-600 text-white text-xs font-medium hover:bg-rose-700 cursor-pointer"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </aside>
   );
+
+  if (isMobileDrawer) {
+    return (
+      <div className="fixed inset-0 z-40 flex md:hidden">
+        <div
+          className="fixed inset-0 bg-slate-950/35"
+          onClick={onCollapse}
+          aria-hidden="true"
+        />
+        <div className="relative z-10 h-full">{sidebarContent}</div>
+      </div>
+    );
+  }
+
+  return sidebarContent;
 }

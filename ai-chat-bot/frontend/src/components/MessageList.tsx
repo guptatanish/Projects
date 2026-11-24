@@ -1,16 +1,23 @@
-// Phase 2 Message Feed — Renders `MessageBubble` items, `TypingIndicator`, and smooth auto-scroll
+// Phase 5 Message Feed — Renders `MessageBubble` items, `TypingIndicator`, ratings/copy callbacks, and smooth auto-scroll
 
 import { useEffect, useRef } from 'react';
-import type { ChatMessageItem } from '../types/chat';
+import type { ChatMessageItem, MessageRating } from '../types/chat';
 import { MessageBubble } from './MessageBubble';
 import { TypingIndicator } from './TypingIndicator';
 
 interface MessageListProps {
   messages: ChatMessageItem[]; // Ordered list of messages in the current chat session
   isLoading: boolean; // True while awaiting Gemini Flash response from POST /api/chat
+  onRateMessage?: (messageId: string, rating: MessageRating) => void;
+  onCopySuccess?: (label: string) => void;
 }
 
-export function MessageList({ messages, isLoading }: MessageListProps) {
+export function MessageList({
+  messages,
+  isLoading,
+  onRateMessage,
+  onCopySuccess,
+}: MessageListProps) {
   // Invisible element at the bottom of the scroll container used as a scroll anchor
   const bottomMarkerRef = useRef<HTMLDivElement | null>(null);
 
@@ -28,7 +35,12 @@ export function MessageList({ messages, isLoading }: MessageListProps) {
     >
       <div className="max-w-3xl mx-auto space-y-5">
         {messages.map((item) => (
-          <MessageBubble key={item.id} message={item} />
+          <MessageBubble
+            key={item.id}
+            message={item}
+            onRate={onRateMessage}
+            onCopySuccess={onCopySuccess}
+          />
         ))}
 
         {isLoading && <TypingIndicator />}

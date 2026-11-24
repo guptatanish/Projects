@@ -1,6 +1,12 @@
-// Phase 4 Main Chat View — Multi-conversation memory, image attachments, and rate-limit / attachment error handling
+// Phase 5 Main Chat View — Auth cookies, 401/403 ownership handling, PATCH rename, FormData/JSON vision, Banner & Toast
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import {
+  getCurrentUser,
+  loginUser,
+  logoutUser,
+  registerUser,
+} from '../services/auth.service';
 import {
   ChatApiError,
   checkBackendHealth,
@@ -13,15 +19,18 @@ import {
   getConversationDetail,
   listConversations,
   mapPersistedMessageToItem,
+  renameConversation,
 } from '../services/conversation.service';
 import type {
   AttachmentMetadata,
+  AuthUser,
   ChatMessageItem,
   ConversationSummary,
+  MessageRating,
   PendingImageAttachment,
 } from '../types/chat';
 import { ConversationSidebar } from './ConversationSidebar';
-import { MessageInput } from './MessageInput';
+import { MessageInput, type ComposerPreferences } from './MessageInput';
 import { MessageList } from './MessageList';
 
 const STARTER_PROMPTS = [
@@ -30,11 +39,27 @@ const STARTER_PROMPTS = [
   'Share my education and key technical milestones',
 ];
 
-interface ErrorBannerState {
+const DEFAULT_PREFERENCES: ComposerPreferences = {
+  scope: 'all',
+  responseStyle: 'detailed',
+  includeCitations: true,
+  strictProfileOnly: false,
+  detailLevel: 3,
+  focusDate: new Date().toISOString().slice(0, 10),
+};
+
+interface BannerAlertState {
   code: string;
   message: string;
+  severity: 'rate-limit' | 'error' | 'info';
   retryPrompt?: string;
   retryConversationId?: number | null;
+}
+
+interface ToastState {
+  id: number;
+  message: string;
+  tone: 'success' | 'warning' | 'error';
 }
 
 function formatCurrentTime(): string {
@@ -53,24 +78,80 @@ function isRateLimitError(code: string, status?: number): boolean {
 }
 
 export function ChatPage() {
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+  const [isCheckingAuth, setIsCheckingAuth] = useState<boolean>(true);
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [authFullName, setAuthFullName] = useState<string>('');
+  const [authEmail, setAuthEmail] = useState<string>('');
+  const [authPassword, setAuthPassword] = useState<string>('');
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [isSubmittingAuth, setIsSubmittingAuth] = useState<boolean>(false);
+
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const [pinnedIds, setPinnedIds] = useState<number[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<number | null>(null);
   const [messages, setMessages] = useState<ChatMessageItem[]>([]);
   const [inputText, setInputText] = useState<string>('');
   const [selectedImage, setSelectedImage] = useState<PendingImageAttachment | null>(null);
+  const [useFormData, setUseFormData] = useState<boolean>(true);
+  const [preferences, setPreferences] = useState<ComposerPreferences>(DEFAULT_PREFERENCES);
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(true);
-  const [isLoadingList, setIsLoadingList] = useState<boolean>(true);
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState<boolean>(false);
+  const [isLoadingList, setIsLoadingList] = useState<boolean>(false);
   const [isLoadingMessages, setIsLoadingMessages] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [renamingId, setRenamingId] = useState<number | null>(null);
   const [isRateLimited, setIsRateLimited] = useState<boolean>(false);
-  const [errorBanner, setErrorBanner] = useState<ErrorBannerState | null>(null);
+  const [bannerAlert, setBannerAlert] = useState<BannerAlertState | null>(null);
+  const [toast, setToast] = useState<ToastState | null>(null);
   const [backendStatus, setBackendStatus] = useState<'checking' | 'online' | 'offline'>(
     'checking'
   );
 
-  // Active AbortController used to cancel an in-flight POST /api/chat request when "Stop" is clicked
   const abortControllerRef = useRef<AbortController | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
+
+  const showToast = useCallback(
+    (message: string, tone: ToastState['tone'] = 'success') => {
+      if (toastTimerRef.current !== null) {
+        window.clearTimeout(toastTimerRef.current);
+      }
+      const nextId = Date.now();
+      setToast({ id: nextId, message, tone });
+      toastTimerRef.current = window.setTimeout(() => {
+        setToast((prev) => (prev?.id === nextId ? null : prev));
+      }, 2800);
+    },
+    []
+  );
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current !== null) {
+        window.clearTimeout(toastTimerRef.current);
+      }
+    };
+  }, []);
+
+  const handleUnauthorizedSession = useCallback(
+    (reason?: string) => {
+      abortControllerRef.current?.abort();
+      abortControllerRef.current = null;
+      setIsLoading(false);
+      setCurrentUser(null);
+      setConversations([]);
+      setActiveConversationId(null);
+      setMessages([]);
+      setAuthError(reason || 'Session expired or unauthorized. Please log in again.');
+      setBannerAlert({
+        code: 'UNAUTHORIZED',
+        message: reason || 'Please sign in to access your private conversations.',
+        severity: 'error',
+      });
+    },
+    []
+  );
 
   const runHealthCheck = useCallback(async () => {
     setBackendStatus('checking');
@@ -88,58 +169,81 @@ export function ChatPage() {
     return items;
   }, []);
 
-  const loadConversationThread = useCallback(async (conversationId: number) => {
-    setIsLoadingMessages(true);
-    setErrorBanner(null);
-    try {
-      const detail = await getConversationDetail(conversationId);
-      setActiveConversationId(detail.id);
-      setMessages(detail.messages.map(mapPersistedMessageToItem));
-      setBackendStatus('online');
-    } catch (error: unknown) {
-      if (error instanceof ChatApiError) {
-        if (error.code === 'NETWORK_ERROR') {
-          setBackendStatus('offline');
+  const loadConversationThread = useCallback(
+    async (conversationId: number) => {
+      setIsLoadingMessages(true);
+      setBannerAlert(null);
+      try {
+        const detail = await getConversationDetail(conversationId);
+        setActiveConversationId(detail.id);
+        setMessages(detail.messages.map(mapPersistedMessageToItem));
+        setBackendStatus('online');
+      } catch (error: unknown) {
+        if (error instanceof ChatApiError) {
+          if (error.code === 'NETWORK_ERROR') {
+            setBackendStatus('offline');
+          }
+          if (error.code === 'UNAUTHORIZED' || error.status === 401) {
+            handleUnauthorizedSession(error.message);
+            return;
+          }
+          setBannerAlert({
+            code: error.code,
+            message: error.message,
+            severity: 'error',
+          });
+        } else {
+          setBannerAlert({
+            code: 'UNEXPECTED_ERROR',
+            message: 'Could not load conversation messages.',
+            severity: 'error',
+          });
         }
-        setErrorBanner({
-          code: error.code,
-          message: error.message,
-        });
-      } else {
-        setErrorBanner({
-          code: 'UNEXPECTED_ERROR',
-          message: 'Could not load conversation messages.',
-        });
+      } finally {
+        setIsLoadingMessages(false);
       }
-    } finally {
-      setIsLoadingMessages(false);
-    }
-  }, []);
+    },
+    [handleUnauthorizedSession]
+  );
 
+  // Initial boot: check backend health + verify active session cookie via GET /api/auth/me
   useEffect(() => {
     void runHealthCheck();
 
     let cancelled = false;
     (async () => {
-      setIsLoadingList(true);
+      setIsCheckingAuth(true);
       try {
-        const list = await listConversations(50);
+        const user = await getCurrentUser();
         if (cancelled) return;
-        setConversations(list);
+        setCurrentUser(user);
         setBackendStatus('online');
 
-        if (list.length > 0) {
-          const firstId = list[0].id;
-          setActiveConversationId(firstId);
-          setIsLoadingMessages(true);
+        if (user) {
+          setIsLoadingList(true);
           try {
-            const detail = await getConversationDetail(firstId);
-            if (!cancelled) {
-              setMessages(detail.messages.map(mapPersistedMessageToItem));
+            const list = await listConversations(50);
+            if (cancelled) return;
+            setConversations(list);
+
+            if (list.length > 0) {
+              const firstId = list[0].id;
+              setActiveConversationId(firstId);
+              setIsLoadingMessages(true);
+              try {
+                const detail = await getConversationDetail(firstId);
+                if (!cancelled) {
+                  setMessages(detail.messages.map(mapPersistedMessageToItem));
+                }
+              } finally {
+                if (!cancelled) {
+                  setIsLoadingMessages(false);
+                }
+              }
             }
           } finally {
             if (!cancelled) {
-              setIsLoadingMessages(false);
+              setIsLoadingList(false);
             }
           }
         }
@@ -150,7 +254,7 @@ export function ChatPage() {
         }
       } finally {
         if (!cancelled) {
-          setIsLoadingList(false);
+          setIsCheckingAuth(false);
         }
       }
     })();
@@ -159,6 +263,66 @@ export function ChatPage() {
       cancelled = true;
     };
   }, [runHealthCheck]);
+
+  const handleAuthSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setAuthError(null);
+    setIsSubmittingAuth(true);
+
+    try {
+      const user =
+        authMode === 'login'
+          ? await loginUser({ email: authEmail, password: authPassword })
+          : await registerUser({
+              email: authEmail,
+              full_name: authFullName,
+              password: authPassword,
+            });
+
+      setCurrentUser(user);
+      setAuthPassword('');
+      setBannerAlert(null);
+      setBackendStatus('online');
+      showToast(
+        authMode === 'login'
+          ? `Signed in as ${user.full_name || user.email}`
+          : `Account created for ${user.full_name || user.email}`,
+        'success'
+      );
+
+      setIsLoadingList(true);
+      try {
+        const list = await listConversations(50);
+        setConversations(list);
+        if (list.length > 0) {
+          await loadConversationThread(list[0].id);
+        } else {
+          setActiveConversationId(null);
+          setMessages([]);
+        }
+      } finally {
+        setIsLoadingList(false);
+      }
+    } catch (error: unknown) {
+      if (error instanceof ChatApiError) {
+        setAuthError(error.message);
+      } else {
+        setAuthError('Authentication failed. Please check your credentials and try again.');
+      }
+    } finally {
+      setIsSubmittingAuth(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await logoutUser();
+    } catch {
+      // Proceed with clearing local session state even if network call fails
+    }
+    handleUnauthorizedSession('You have been logged out.');
+    showToast('Signed out', 'success');
+  };
 
   const handleStop = () => {
     abortControllerRef.current?.abort();
@@ -172,13 +336,14 @@ export function ChatPage() {
     setMessages([]);
     setInputText('');
     setSelectedImage(null);
-    setErrorBanner(null);
+    setBannerAlert(null);
     setIsRateLimited(false);
+    setMobileDrawerOpen(false);
   };
 
   const handleCreateExplicitConversation = async () => {
     handleStop();
-    setErrorBanner(null);
+    setBannerAlert(null);
     try {
       const created = await createConversation('New Chat');
       await refreshConversationList();
@@ -186,28 +351,78 @@ export function ChatPage() {
       setMessages([]);
       setSelectedImage(null);
       setBackendStatus('online');
+      showToast('Created new conversation thread', 'success');
     } catch (error: unknown) {
       if (error instanceof ChatApiError) {
-        setErrorBanner({ code: error.code, message: error.message });
+        if (error.code === 'UNAUTHORIZED' || error.status === 401) {
+          handleUnauthorizedSession(error.message);
+          return;
+        }
+        setBannerAlert({
+          code: error.code,
+          message: error.message,
+          severity: 'error',
+        });
       }
     }
   };
 
   const handleSelectConversation = (conversationId: number) => {
+    setMobileDrawerOpen(false);
     if (conversationId === activeConversationId && messages.length > 0) return;
     handleStop();
     setSelectedImage(null);
     void loadConversationThread(conversationId);
   };
 
+  const handleRenameConversation = async (conversationId: number, nextTitle: string) => {
+    if (renamingId !== null) return;
+    setRenamingId(conversationId);
+    setBannerAlert(null);
+
+    try {
+      await renameConversation(conversationId, nextTitle);
+      await refreshConversationList();
+      showToast('Conversation renamed', 'success');
+    } catch (error: unknown) {
+      if (error instanceof ChatApiError) {
+        if (error.code === 'UNAUTHORIZED' || error.status === 401) {
+          handleUnauthorizedSession(error.message);
+          return;
+        }
+        setBannerAlert({
+          code: error.code,
+          message: error.message,
+          severity: 'error',
+        });
+        showToast(error.message, 'error');
+      }
+    } finally {
+      setRenamingId(null);
+    }
+  };
+
+  const handleTogglePinConversation = (conversationId: number) => {
+    setPinnedIds((prev) => {
+      const exists = prev.includes(conversationId);
+      const next = exists
+        ? prev.filter((id) => id !== conversationId)
+        : [...prev, conversationId];
+      showToast(exists ? 'Conversation unpinned' : 'Conversation pinned to top', 'success');
+      return next;
+    });
+  };
+
   const handleDeleteConversation = async (conversationId: number) => {
     if (deletingId !== null) return;
     setDeletingId(conversationId);
-    setErrorBanner(null);
+    setBannerAlert(null);
 
     try {
       await deleteConversation(conversationId);
+      setPinnedIds((prev) => prev.filter((id) => id !== conversationId));
       const updatedList = await refreshConversationList();
+      showToast('Conversation deleted', 'success');
 
       if (activeConversationId === conversationId) {
         if (updatedList.length > 0) {
@@ -223,14 +438,21 @@ export function ChatPage() {
         if (error.code === 'NETWORK_ERROR') {
           setBackendStatus('offline');
         }
-        setErrorBanner({
+        if (error.code === 'UNAUTHORIZED' || error.status === 401) {
+          handleUnauthorizedSession(error.message);
+          return;
+        }
+        setBannerAlert({
           code: error.code,
           message: error.message,
+          severity: 'error',
         });
+        showToast(error.message, 'error');
       } else {
-        setErrorBanner({
+        setBannerAlert({
           code: 'UNEXPECTED_ERROR',
           message: 'Failed to delete conversation.',
+          severity: 'error',
         });
       }
     } finally {
@@ -241,32 +463,62 @@ export function ChatPage() {
   const handleAttachmentError = (message: string) => {
     if (!message) {
       if (
-        errorBanner?.code === 'INVALID_ATTACHMENT' ||
-        errorBanner?.code === 'ATTACHMENT_TOO_LARGE'
+        bannerAlert?.code === 'INVALID_ATTACHMENT' ||
+        bannerAlert?.code === 'ATTACHMENT_TOO_LARGE'
       ) {
-        setErrorBanner(null);
+        setBannerAlert(null);
       }
       return;
     }
-    setErrorBanner({
+    setBannerAlert({
       code: 'INVALID_ATTACHMENT',
       message,
+      severity: 'error',
     });
+    showToast(message, 'error');
   };
 
-  // Sends message + optional validated image attachment to POST /api/chat
+  const handleRateMessage = (messageId: string, rating: MessageRating) => {
+    setMessages((prev) =>
+      prev.map((m) => (m.id === messageId ? { ...m, rating } : m))
+    );
+    if (rating) {
+      showToast(
+        rating === 'up' ? 'Marked response as helpful' : 'Marked response as needs work',
+        'success'
+      );
+    }
+  };
+
+  const composePromptWithPreferences = (rawText: string): string => {
+    const parts: string[] = [];
+    if (preferences.scope !== 'all') {
+      parts.push(`[Scope: ${preferences.scope.toUpperCase()}]`);
+    }
+    if (preferences.responseStyle !== 'detailed' || preferences.detailLevel !== 3) {
+      parts.push(`[Style: ${preferences.responseStyle}, Depth: ${preferences.detailLevel}/5]`);
+    }
+    if (preferences.strictProfileOnly) {
+      parts.push('[Strict Profile Grounding: true]');
+    }
+    if (!parts.length) return rawText;
+    return `${parts.join(' ')}\n${rawText}`;
+  };
+
   const handleSend = async (
     overridePrompt?: string,
     targetConversationId?: number | null
   ) => {
-    const textToSend = (overridePrompt ?? inputText).trim();
-    if (!textToSend || isLoading || isRateLimited) return;
+    const rawTextToSend = (overridePrompt ?? inputText).trim();
+    if (!rawTextToSend || isLoading || isRateLimited) return;
 
+    const textToSend =
+      overridePrompt === undefined ? composePromptWithPreferences(rawTextToSend) : rawTextToSend;
     const conversationIdToUse =
       targetConversationId !== undefined ? targetConversationId : activeConversationId;
     const imageToSend = overridePrompt === undefined ? selectedImage : null;
 
-    setErrorBanner(null);
+    setBannerAlert(null);
 
     const optimisticAttachments: AttachmentMetadata[] | undefined = imageToSend
       ? [
@@ -285,7 +537,7 @@ export function ChatPage() {
       id: `user-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       conversationId: conversationIdToUse ?? undefined,
       role: 'user',
-      text: textToSend,
+      text: rawTextToSend,
       createdAt: formatCurrentTime(),
       attachments: optimisticAttachments,
     };
@@ -303,6 +555,7 @@ export function ChatPage() {
       const response = await sendChatMessage(textToSend, {
         conversationId: conversationIdToUse ?? undefined,
         image: imageToSend,
+        useFormData,
         signal: controller.signal,
       });
 
@@ -320,11 +573,11 @@ export function ChatPage() {
         createdAt: formatCurrentTime(),
         mode: response.mode,
         model: response.model,
+        rating: null,
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
 
-      // Refresh conversation list so titles & timestamps reflect PostgreSQL
       try {
         await refreshConversationList();
       } catch {
@@ -340,25 +593,35 @@ export function ChatPage() {
           setBackendStatus('offline');
         }
 
-        if (isRateLimitError(error.code, error.status)) {
-          setIsRateLimited(true);
-          setErrorBanner({
-            code: error.code || 'AI_RATE_LIMITED',
-            message: error.message,
-          });
+        if (error.code === 'UNAUTHORIZED' || error.status === 401) {
+          handleUnauthorizedSession(error.message);
           return;
         }
 
-        setErrorBanner({
+        if (isRateLimitError(error.code, error.status)) {
+          setIsRateLimited(true);
+          setBannerAlert({
+            code: error.code || 'AI_RATE_LIMITED',
+            message: error.message,
+            severity: 'rate-limit',
+          });
+          showToast('Rate limit reached (429 AI_RATE_LIMITED)', 'warning');
+          return;
+        }
+
+        setBannerAlert({
           code: error.code,
           message: error.message,
-          retryPrompt: error.retryable ? textToSend : undefined,
+          severity: 'error',
+          retryPrompt: error.retryable ? rawTextToSend : undefined,
           retryConversationId: error.retryable ? conversationIdToUse : null,
         });
+        showToast(error.message, 'error');
       } else {
-        setErrorBanner({
+        setBannerAlert({
           code: 'UNEXPECTED_ERROR',
           message: 'Something unexpected happened while sending your message.',
+          severity: 'error',
         });
       }
     } finally {
@@ -367,8 +630,144 @@ export function ChatPage() {
     }
   };
 
-  const activeConversation = conversations.find((c) => c.id === activeConversationId);
+  const decoratedConversations: ConversationSummary[] = conversations.map((conv) => ({
+    ...conv,
+    is_pinned: pinnedIds.includes(conv.id) || Boolean(conv.is_pinned),
+  }));
+
+  const activeConversation = decoratedConversations.find(
+    (c) => c.id === activeConversationId
+  );
   const isEmptyChat = messages.length === 0 && !isLoading && !isLoadingMessages;
+
+  if (isCheckingAuth) {
+    return (
+      <div className="h-screen w-full flex items-center justify-center bg-slate-50 text-slate-600 text-xs">
+        Verifying session cookie...
+      </div>
+    );
+  }
+
+  if (!currentUser) {
+    return (
+      <div className="min-h-screen w-full flex items-center justify-center bg-slate-50 px-4 py-10 text-slate-900">
+        <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="flex items-center justify-between gap-2 mb-4">
+            <div>
+              <span className="px-2 py-0.5 rounded-full text-[11px] font-medium bg-indigo-50 text-indigo-700">
+                Phase 5 • Cookie Auth
+              </span>
+              <h1 className="text-lg font-semibold text-slate-900 mt-2">
+                {authMode === 'login' ? 'Sign in to your workspace' : 'Create your account'}
+              </h1>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Sessions are stored in an <code className="font-mono">HttpOnly</code> cookie (
+                <code className="font-mono">ai_chat_bot_session</code>).
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 rounded-xl border border-slate-200 bg-slate-50 p-1 mb-4 text-xs font-medium">
+            <button
+              type="button"
+              onClick={() => {
+                setAuthMode('login');
+                setAuthError(null);
+              }}
+              className={`py-1.5 rounded-lg transition-colors cursor-pointer ${
+                authMode === 'login'
+                  ? 'bg-white text-slate-900 shadow-2xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Login
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAuthMode('register');
+                setAuthError(null);
+              }}
+              className={`py-1.5 rounded-lg transition-colors cursor-pointer ${
+                authMode === 'register'
+                  ? 'bg-white text-slate-900 shadow-2xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Register
+            </button>
+          </div>
+
+          {authError && (
+            <div
+              role="alert"
+              className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-xs text-rose-900"
+            >
+              {authError}
+            </div>
+          )}
+
+          <form onSubmit={(e) => void handleAuthSubmit(e)} className="space-y-3.5 text-xs">
+            {authMode === 'register' && (
+              <label className="flex flex-col gap-1">
+                <span className="font-medium text-slate-700">Full Name</span>
+                <input
+                  type="text"
+                  required
+                  minLength={1}
+                  maxLength={120}
+                  value={authFullName}
+                  onChange={(e) => setAuthFullName(e.target.value)}
+                  placeholder="Tanish Gupta"
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-slate-400"
+                />
+              </label>
+            )}
+
+            <label className="flex flex-col gap-1">
+              <span className="font-medium text-slate-700">Email</span>
+              <input
+                type="email"
+                required
+                value={authEmail}
+                onChange={(e) => setAuthEmail(e.target.value)}
+                placeholder="you@example.com"
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-slate-400"
+              />
+            </label>
+
+            <label className="flex flex-col gap-1">
+              <span className="font-medium text-slate-700">Password</span>
+              <input
+                type="password"
+                required
+                minLength={8}
+                maxLength={128}
+                value={authPassword}
+                onChange={(e) => setAuthPassword(e.target.value)}
+                placeholder="At least 8 characters"
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-slate-400"
+              />
+            </label>
+
+            <button
+              type="submit"
+              disabled={isSubmittingAuth}
+              className="w-full py-2.5 rounded-xl bg-slate-900 text-white text-xs font-medium hover:bg-slate-800 disabled:opacity-50 transition-colors cursor-pointer"
+            >
+              {isSubmittingAuth
+                ? authMode === 'login'
+                  ? 'Signing in...'
+                  : 'Creating account...'
+                : authMode === 'login'
+                  ? 'Sign In'
+                  : 'Create Account'}
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
 
   const composer = (
     <MessageInput
@@ -378,6 +777,10 @@ export function ChatPage() {
       onStop={handleStop}
       selectedImage={selectedImage}
       onSelectImage={setSelectedImage}
+      useFormData={useFormData}
+      onToggleFormData={setUseFormData}
+      preferences={preferences}
+      onChangePreferences={setPreferences}
       onAttachmentError={handleAttachmentError}
       isLoading={isLoading}
       isRateLimited={isRateLimited}
@@ -387,31 +790,58 @@ export function ChatPage() {
   );
 
   return (
-    <div className="h-screen w-full flex bg-white text-slate-900 overflow-hidden">
-      {/* Persisted Conversation Sidebar */}
+    <div className="h-screen w-full flex bg-white text-slate-900 overflow-hidden relative">
       {sidebarOpen && (
+        <div className="hidden md:block h-full">
+          <ConversationSidebar
+            conversations={decoratedConversations}
+            activeConversationId={activeConversationId}
+            isLoadingList={isLoadingList}
+            deletingId={deletingId}
+            renamingId={renamingId}
+            onSelectConversation={handleSelectConversation}
+            onNewChat={handleNewChat}
+            onRenameConversation={handleRenameConversation}
+            onTogglePinConversation={handleTogglePinConversation}
+            onDeleteConversation={(id) => void handleDeleteConversation(id)}
+            onCollapse={() => setSidebarOpen(false)}
+          />
+        </div>
+      )}
+
+      {mobileDrawerOpen && (
         <ConversationSidebar
-          conversations={conversations}
+          conversations={decoratedConversations}
           activeConversationId={activeConversationId}
           isLoadingList={isLoadingList}
           deletingId={deletingId}
+          renamingId={renamingId}
+          isMobileDrawer
           onSelectConversation={handleSelectConversation}
           onNewChat={handleNewChat}
+          onRenameConversation={handleRenameConversation}
+          onTogglePinConversation={handleTogglePinConversation}
           onDeleteConversation={(id) => void handleDeleteConversation(id)}
-          onCollapse={() => setSidebarOpen(false)}
+          onCollapse={() => setMobileDrawerOpen(false)}
         />
       )}
 
-      {/* Main Chat Workspace */}
       <main className="flex-1 flex flex-col min-w-0 h-full bg-white">
-        {/* Top Bar */}
         <header className="h-14 shrink-0 border-b border-slate-200/80 px-4 flex items-center justify-between bg-slate-50/70">
           <div className="flex items-center gap-2.5 min-w-0">
+            <button
+              type="button"
+              onClick={() => setMobileDrawerOpen(true)}
+              className="md:hidden px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-100 cursor-pointer"
+            >
+              Menu
+            </button>
+
             {!sidebarOpen && (
               <button
                 type="button"
                 onClick={() => setSidebarOpen(true)}
-                className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-100 cursor-pointer"
+                className="hidden md:inline-flex px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-100 cursor-pointer"
               >
                 Chats
               </button>
@@ -421,8 +851,8 @@ export function ChatPage() {
               {activeConversation?.title || 'Personal Profile & Knowledge Assistant'}
             </h1>
 
-            <span className="hidden md:inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium bg-indigo-50 text-indigo-700">
-              Phase 4 • Attachments &amp; Rate Limits
+            <span className="hidden lg:inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium bg-indigo-50 text-indigo-700">
+              Phase 5 • Vision &amp; Security
             </span>
 
             <span
@@ -439,6 +869,10 @@ export function ChatPage() {
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
+            <span className="hidden sm:inline text-[11px] text-slate-500 max-w-40 truncate">
+              {currentUser.full_name || currentUser.email}
+            </span>
+
             <button
               type="button"
               onClick={() => void handleCreateExplicitConversation()}
@@ -457,27 +891,19 @@ export function ChatPage() {
 
             <button
               type="button"
-              onClick={handleNewChat}
-              disabled={
-                messages.length === 0 &&
-                !errorBanner &&
-                !isLoading &&
-                activeConversationId === null &&
-                !selectedImage
-              }
-              className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+              onClick={() => void handleLogout()}
+              className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
             >
-              Clear View
+              Logout
             </button>
           </div>
         </header>
 
-        {/* Error / Rate-Limit / Attachment Banner */}
-        {errorBanner && (
+        {bannerAlert && (
           <div
             role="alert"
             className={`shrink-0 border-b px-4 py-2.5 ${
-              isRateLimitError(errorBanner.code)
+              bannerAlert.severity === 'rate-limit'
                 ? 'border-amber-200 bg-amber-50'
                 : 'border-rose-200 bg-rose-50'
             }`}
@@ -485,23 +911,23 @@ export function ChatPage() {
             <div className="max-w-3xl mx-auto flex flex-wrap items-center justify-between gap-3 text-xs">
               <div
                 className={
-                  isRateLimitError(errorBanner.code)
+                  bannerAlert.severity === 'rate-limit'
                     ? 'text-amber-950'
                     : 'text-rose-900'
                 }
               >
-                <span className="font-semibold mr-1.5">[{errorBanner.code}]</span>
-                <span>{errorBanner.message}</span>
+                <span className="font-semibold mr-1.5">[{bannerAlert.code}]</span>
+                <span>{bannerAlert.message}</span>
               </div>
 
               <div className="flex items-center gap-2 shrink-0">
-                {errorBanner.retryPrompt && !isRateLimited && (
+                {bannerAlert.retryPrompt && !isRateLimited && (
                   <button
                     type="button"
                     onClick={() =>
                       void handleSend(
-                        errorBanner.retryPrompt,
-                        errorBanner.retryConversationId
+                        bannerAlert.retryPrompt,
+                        bannerAlert.retryConversationId
                       )
                     }
                     className="px-2.5 py-1 rounded-md bg-slate-900 text-white font-medium hover:bg-slate-800 cursor-pointer"
@@ -513,8 +939,8 @@ export function ChatPage() {
                 <button
                   type="button"
                   onClick={() => {
-                    setErrorBanner(null);
-                    if (isRateLimitError(errorBanner.code)) {
+                    setBannerAlert(null);
+                    if (isRateLimitError(bannerAlert.code)) {
                       setIsRateLimited(false);
                     }
                   }}
@@ -527,7 +953,6 @@ export function ChatPage() {
           </div>
         )}
 
-        {/* Thread Loading vs. Empty Welcome State vs. Active Message Feed */}
         {isLoadingMessages ? (
           <div className="flex-1 flex items-center justify-center px-4 text-xs text-slate-500">
             Loading persisted conversation...
@@ -539,7 +964,7 @@ export function ChatPage() {
                 Ask anything about your profile
               </p>
               <p className="text-sm text-slate-500 mt-1.5">
-                Multi-turn conversations, image attachments, and PostgreSQL history powered by Gemini Flash.
+                Cookie-authenticated threads, image uploads (up to 5 MB), and PostgreSQL history powered by Gemini Flash.
               </p>
             </div>
 
@@ -547,12 +972,28 @@ export function ChatPage() {
           </div>
         ) : (
           <>
-            <MessageList messages={messages} isLoading={isLoading} />
+            <MessageList
+              messages={messages}
+              isLoading={isLoading}
+              onRateMessage={handleRateMessage}
+              onCopySuccess={(label) => showToast(label, 'success')}
+            />
 
             <div className="shrink-0 border-t border-slate-100 bg-white px-4 py-3">
               {composer}
             </div>
           </>
+        )}
+
+        {toast && (
+          <div
+            key={toast.id}
+            role="status"
+            aria-live="polite"
+            className="fixed bottom-5 right-5 z-50 rounded-xl border border-slate-800 bg-slate-900 text-white px-4 py-2.5 text-xs font-medium shadow-lg"
+          >
+            {toast.message}
+          </div>
         )}
       </main>
     </div>

@@ -45,10 +45,12 @@ def get_conversation_by_id(
     *,
     with_messages: bool = False,
 ) -> Conversation | None:
-    """Fetch a single conversation by ID, optionally preloading its ordered messages."""
+    """Fetch a single conversation by ID, optionally preloading its ordered messages and attachments."""
     stmt = select(Conversation).where(Conversation.id == conversation_id)
     if with_messages:
-        stmt = stmt.options(selectinload(Conversation.messages))
+        stmt = stmt.options(
+            selectinload(Conversation.messages).selectinload(Message.attachments)
+        )
     return db.scalar(stmt)
 
 
