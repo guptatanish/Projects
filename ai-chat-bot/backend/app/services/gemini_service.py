@@ -96,13 +96,16 @@ class GeminiService:
         self,
         api_key: str | None = None,
         model: str | None = None,
-        timeout_ms: int = 30000,
+        timeout_ms: int | None = None,
     ) -> None:
-        self.api_key = (api_key if api_key is not None else settings.gemini_api_key).strip()
+        self.api_key = (
+            api_key if api_key is not None else settings.gemini_api_key
+        ).strip()
         self.model = (
             model if model is not None else settings.gemini_model
-        ).strip() or "gemini-2.5-flash"
-        self.timeout_ms = timeout_ms
+        ).strip() or "gemini-3.5-flash-lite"
+        default_timeout_ms = max(1000, int(settings.gemini_timeout_seconds * 1000))
+        self.timeout_ms = timeout_ms if timeout_ms is not None else default_timeout_ms
 
     def _get_client(self) -> genai.Client:
         """Create a genai.Client using the server-side API key and explicit timeout."""
@@ -164,7 +167,12 @@ class GeminiService:
                     status_code=503,
                 ) from exc
 
-            if "504" in err_text or "deadline_exceeded" in err_text or "timeout" in err_text or "timed out" in err_text:
+            if (
+                "504" in err_text
+                or "deadline_exceeded" in err_text
+                or "timeout" in err_text
+                or "timed out" in err_text
+            ):
                 logger.warning("Gemini request timed out / deadline exceeded: %s", exc)
                 raise AppError(
                     code="AI_TIMEOUT",

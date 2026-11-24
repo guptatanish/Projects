@@ -3,13 +3,14 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, String, func
+from sqlalchemy import DateTime, ForeignKey, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
 
 if TYPE_CHECKING:
     from app.models.message import Message
+    from app.models.user import User
 
 
 class Conversation(Base):
@@ -18,6 +19,11 @@ class Conversation(Base):
     __tablename__ = "conversations"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
+    )
     title: Mapped[str] = mapped_column(
         String(200),
         default="New Chat",
@@ -38,6 +44,7 @@ class Conversation(Base):
         nullable=False,
     )
 
+    user: Mapped[User | None] = relationship(back_populates="conversations")
     messages: Mapped[list[Message]] = relationship(
         back_populates="conversation",
         cascade="all, delete-orphan",

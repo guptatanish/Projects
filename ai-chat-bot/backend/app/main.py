@@ -1,10 +1,12 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.routes.auth import router as auth_router
 from app.api.routes.chat import router as chat_router
 from app.api.routes.conversations import router as conversations_router
 from app.core.config import settings
 from app.core.errors import register_exception_handlers
+from app.db.session import engine
 from app.utils.response import json_success
 
 
@@ -33,10 +35,16 @@ def create_app() -> FastAPI:
                 "status": "ok",
                 "service": settings.app_name,
                 "environment": settings.app_env,
-                "phase": 4,
+                "phase": 5,
             }
         )
 
+    @application.on_event("shutdown")
+    def on_shutdown() -> None:
+        """Dispose database engine connections cleanly on shutdown."""
+        engine.dispose()
+
+    application.include_router(auth_router, prefix=settings.api_v1_prefix)
     application.include_router(chat_router, prefix=settings.api_v1_prefix)
     application.include_router(conversations_router, prefix=settings.api_v1_prefix)
 

@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Literal
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -19,7 +20,28 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3.5-flash-lite"
+    gemini_timeout_seconds: float = 30.0
     database_url: str = "postgresql+psycopg://postgres:postgres@127.0.0.1:5432/ai_chat_bot"
+
+    # Auth & HttpOnly cookie settings
+    jwt_secret_key: str = "dev-only-change-me-in-production-secret-key"
+    jwt_algorithm: str = "HS256"
+    access_token_expire_minutes: int = 60 * 24 * 7
+    cookie_name: str = "ai_chat_bot_session"
+    cookie_samesite: Literal["lax", "strict", "none"] = "lax"
+    cookie_secure: bool = False
+    cookie_domain: str | None = None
+
+    # History windowing & size guard
+    history_message_limit: int = 20
+    history_max_chars: int = 16000
+
+    # Rate limits (protects ₹0 free-tier Gemini quota)
+    rate_limit_per_minute: int = 20
+    rate_limit_per_day: int = 300
+
+    # Image upload size cap (5 MB)
+    max_image_bytes: int = 5 * 1024 * 1024
 
     @field_validator("api_v1_prefix")
     @classmethod
@@ -30,12 +52,34 @@ class Settings(BaseSettings):
             cleaned = f"/{cleaned}"
         return cleaned.rstrip("/") or "/api"
 
-    @field_validator("gemini_api_key", "gemini_model", "database_url", mode="before")
+    @field_validator(
+        "gemini_api_key",
+        "gemini_model",
+        "database_url",
+        "jwt_secret_key",
+        "cookie_name",
+        mode="before",
+    )
     @classmethod
     def strip_string_config(cls, value: object) -> object:
         """Trim accidental whitespace around string environment settings."""
         if isinstance(value, str):
             return value.strip()
+        return value
+
+    @field_validator("cookie_domain", mode="before")
+    @classmethod
+    def normalize_cookie_domain(cls, value: object) -> object:
+        if isinstance(value, str):
+            cleaned = value.strip()
+            return cleaned or None
+        return value
+
+    @field_validator("cookie_samesite", mode="before")
+    @classmethod
+    def normalize_cookie_samesite(cls, value: object) -> object:
+        if isinstance(value, str):
+            return value.strip().lower()
         return value
 
     @property
