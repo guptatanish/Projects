@@ -1,4 +1,4 @@
-// Phase 3 Main Chat View — PostgreSQL-backed multi-conversation history, multi-turn chat, and error handling
+// Phase 4 Main Chat View — Multi-conversation memory, image attachments, and rate-limit / attachment error handling
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -14,7 +14,12 @@ import {
   listConversations,
   mapPersistedMessageToItem,
 } from '../services/conversation.service';
-import type { ChatMessageItem, ConversationSummary } from '../types/chat';
+import type {
+  AttachmentMetadata,
+  ChatMessageItem,
+  ConversationSummary,
+  PendingImageAttachment,
+} from '../types/chat';
 import { ConversationSidebar } from './ConversationSidebar';
 import { MessageInput } from './MessageInput';
 import { MessageList } from './MessageList';
@@ -32,7 +37,6 @@ interface ErrorBannerState {
   retryConversationId?: number | null;
 }
 
-// Formats current local time like "02:40 AM" for newly sent/received messages
 function formatCurrentTime(): string {
   return new Date().toLocaleTimeString([], {
     hour: '2-digit',
@@ -40,11 +44,20 @@ function formatCurrentTime(): string {
   });
 }
 
+function isRateLimitError(code: string, status?: number): boolean {
+  return (
+    code === 'AI_RATE_LIMITED' ||
+    code === 'RATE_LIMIT_EXCEEDED' ||
+    status === 429
+  );
+}
+
 export function ChatPage() {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<number | null>(null);
   const [messages, setMessages] = useState<ChatMessageItem[]>([]);
   const [inputText, setInputText] = useState<string>('');
+  const [selectedImage, setSelectedImage] = useState<PendingImageAttachment | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(true);
   const [isLoadingList, setIsLoadingList] = useState<boolean>(true);
   const [isLoadingMessages, setIsLoadingMessages] = useState<boolean>(false);
@@ -69,14 +82,12 @@ export function ChatPage() {
     }
   }, []);
 
-  // Refreshes the sidebar conversation list from GET /api/conversations
   const refreshConversationList = useCallback(async () => {
     const items = await listConversations(50);
     setConversations(items);
     return items;
   }, []);
 
-  // Loads persisted messages for a specific conversation via GET /api/conversations/{id}
   const loadConversationThread = useCallback(async (conversationId: number) => {
     setIsLoadingMessages(true);
     setErrorBanner(null);
@@ -105,7 +116,6 @@ export function ChatPage() {
     }
   }, []);
 
-  // On initial mount: check health and load existing PostgreSQL conversations
   useEffect(() => {
     void runHealthCheck();
 
@@ -156,17 +166,16 @@ export function ChatPage() {
     setIsLoading(false);
   };
 
-  // Starts a clean new chat thread (unselected ID until first message is sent or created)
   const handleNewChat = () => {
     handleStop();
     setActiveConversationId(null);
     setMessages([]);
     setInputText('');
+    setSelectedImage(null);
     setErrorBanner(null);
     setIsRateLimited(false);
   };
 
-  // Optional explicit thread creation via POST /api/conversations
   const handleCreateExplicitConversation = async () => {
     handleStop();
     setErrorBanner(null);
@@ -175,6 +184,7 @@ export function ChatPage() {
       await refreshConversationList();
       setActiveConversationId(created.id);
       setMessages([]);
+      setSelectedImage(null);
       setBackendStatus('online');
     } catch (error: unknown) {
       if (error instanceof ChatApiError) {
@@ -183,14 +193,13 @@ export function ChatPage() {
     }
   };
 
-  // Switches to another saved conversation in PostgreSQL
   const handleSelectConversation = (conversationId: number) => {
     if (conversationId === activeConversationId && messages.length > 0) return;
     handleStop();
+    setSelectedImage(null);
     void loadConversationThread(conversationId);
   };
 
-  // Deletes a conversation via DELETE /api/conversations/{id} (204 No Content)
   const handleDeleteConversation = async (conversationId: number) => {
     if (deletingId !== null) return;
     setDeletingId(conversationId);
@@ -229,7 +238,23 @@ export function ChatPage() {
     }
   };
 
-  // Sends message to POST /api/chat passing `conversationId` when continuing a thread
+  const handleAttachmentError = (message: string) => {
+    if (!message) {
+      if (
+        errorBanner?.code === 'INVALID_ATTACHMENT' ||
+        errorBanner?.code === 'ATTACHMENT_TOO_LARGE'
+      ) {
+        setErrorBanner(null);
+      }
+      return;
+    }
+    setErrorBanner({
+      code: 'INVALID_ATTACHMENT',
+      message,
+    });
+  };
+
+  // Sends message + optional validated image attachment to POST /api/chat
   const handleSend = async (
     overridePrompt?: string,
     targetConversationId?: number | null
@@ -239,11 +264,56 @@ export function ChatPage() {
 
     const conversationIdToUse =
       targetConversationId !== undefined ? targetConversationId : activeConversationId;
+    const imageToSend = overridePrompt === undefined ? selectedImage : null;
 
     setErrorBanner(null);
 
+    const optimisticAttachments: AttachmentMetadata[] | undefined = imageToSend
+      ? [
+          {
+            id: Date.now(),
+            message_id: 0,
+            file_name: imageToSend.fileName,
+            mime_type: imageToSend.mimeType,
+            file_size: imageToSend.fileSize,
+            created_at: new Date().toISOString(),
+          },
+        ]
+      : undefined;
+
     const userMessage: ChatMessageItem = {
-      id: `user-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, conversationId: conversationIdToUse ?? undefined, role: 'user', text: textToSend, createdAt: formatCurrentTime(), };  setMessages((prev) => [...prev, userMessage]); if (overridePrompt === undefined) { setInputText(''); } setIsLoading(true);  const controller = new AbortController(); abortControllerRef.current = controller;  try { const response = await sendChatMessage( textToSend, conversationIdToUse ?? undefined, controller.signal );  setBackendStatus('online'); setActiveConversationId(response.conversation_id);  const assistantMessage: ChatMessageItem = { id: `msg-${response.message_id}`,
+      id: `user-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      conversationId: conversationIdToUse ?? undefined,
+      role: 'user',
+      text: textToSend,
+      createdAt: formatCurrentTime(),
+      attachments: optimisticAttachments,
+    };
+
+    setMessages((prev) => [...prev, userMessage]);
+    if (overridePrompt === undefined) {
+      setInputText('');
+    }
+    setIsLoading(true);
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    try {
+      const response = await sendChatMessage(textToSend, {
+        conversationId: conversationIdToUse ?? undefined,
+        image: imageToSend,
+        signal: controller.signal,
+      });
+
+      setBackendStatus('online');
+      setActiveConversationId(response.conversation_id);
+      if (imageToSend) {
+        setSelectedImage(null);
+      }
+
+      const assistantMessage: ChatMessageItem = {
+        id: `msg-${response.message_id}`,
         conversationId: response.conversation_id,
         role: 'assistant',
         text: response.reply,
@@ -254,7 +324,7 @@ export function ChatPage() {
 
       setMessages((prev) => [...prev, assistantMessage]);
 
-      // Refresh sidebar list so titles and `updated_at` timestamps reflect PostgreSQL
+      // Refresh conversation list so titles & timestamps reflect PostgreSQL
       try {
         await refreshConversationList();
       } catch {
@@ -270,10 +340,10 @@ export function ChatPage() {
           setBackendStatus('offline');
         }
 
-        if (error.code === 'RATE_LIMIT_EXCEEDED' || error.status === 429) {
+        if (isRateLimitError(error.code, error.status)) {
           setIsRateLimited(true);
           setErrorBanner({
-            code: error.code || 'RATE_LIMIT_EXCEEDED',
+            code: error.code || 'AI_RATE_LIMITED',
             message: error.message,
           });
           return;
@@ -306,6 +376,9 @@ export function ChatPage() {
       onChange={setInputText}
       onSend={(promptOverride) => void handleSend(promptOverride)}
       onStop={handleStop}
+      selectedImage={selectedImage}
+      onSelectImage={setSelectedImage}
+      onAttachmentError={handleAttachmentError}
       isLoading={isLoading}
       isRateLimited={isRateLimited}
       isEmptyState={isEmptyChat}
@@ -348,13 +421,63 @@ export function ChatPage() {
               {activeConversation?.title || 'Personal Profile & Knowledge Assistant'}
             </h1>
 
-            <span className="hidden md:inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-800">
-              Phase 3 • PostgreSQL Memory
+            <span className="hidden md:inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium bg-indigo-50 text-indigo-700">
+              Phase 4 • Attachments &amp; Rate Limits
             </span>
 
             <span
-              className={`px-2 py-0.5 rounded-full text-[11px] font-medium ${ backendStatus === 'online' ? 'bg-emerald-100 text-emerald-800' : backendStatus === 'offline' ? 'bg-rose-100 text-rose-800' : 'bg-slate-200 text-slate-700' }`} > {backendStatus} </span> </div>  <div className="flex items-center gap-2 shrink-0"> <button type="button" onClick={() => void handleCreateExplicitConversation()} className="hidden sm:inline-flex px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer" > New Thread </button>  <button type="button" onClick={() => void runHealthCheck()} className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer" > Health </button>  <button type="button" onClick={handleNewChat} disabled={messages.length === 0 && !errorBanner && !isLoading && activeConversationId === null} className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer" > Clear View </button> </div> </header>  {/* Error / Rate-Limit Banner */} {errorBanner && ( <div role="alert" className={`shrink-0 border-b px-4 py-2.5 ${
-              errorBanner.code === 'RATE_LIMIT_EXCEEDED'
+              className={`px-2 py-0.5 rounded-full text-[11px] font-medium ${
+                backendStatus === 'online'
+                  ? 'bg-emerald-100 text-emerald-800'
+                  : backendStatus === 'offline'
+                    ? 'bg-rose-100 text-rose-800'
+                    : 'bg-slate-200 text-slate-700'
+              }`}
+            >
+              {backendStatus}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => void handleCreateExplicitConversation()}
+              className="hidden sm:inline-flex px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+            >
+              New Thread
+            </button>
+
+            <button
+              type="button"
+              onClick={() => void runHealthCheck()}
+              className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+            >
+              Health
+            </button>
+
+            <button
+              type="button"
+              onClick={handleNewChat}
+              disabled={
+                messages.length === 0 &&
+                !errorBanner &&
+                !isLoading &&
+                activeConversationId === null &&
+                !selectedImage
+              }
+              className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+            >
+              Clear View
+            </button>
+          </div>
+        </header>
+
+        {/* Error / Rate-Limit / Attachment Banner */}
+        {errorBanner && (
+          <div
+            role="alert"
+            className={`shrink-0 border-b px-4 py-2.5 ${
+              isRateLimitError(errorBanner.code)
                 ? 'border-amber-200 bg-amber-50'
                 : 'border-rose-200 bg-rose-50'
             }`}
@@ -362,7 +485,7 @@ export function ChatPage() {
             <div className="max-w-3xl mx-auto flex flex-wrap items-center justify-between gap-3 text-xs">
               <div
                 className={
-                  errorBanner.code === 'RATE_LIMIT_EXCEEDED'
+                  isRateLimitError(errorBanner.code)
                     ? 'text-amber-950'
                     : 'text-rose-900'
                 }
@@ -391,7 +514,7 @@ export function ChatPage() {
                   type="button"
                   onClick={() => {
                     setErrorBanner(null);
-                    if (errorBanner.code === 'RATE_LIMIT_EXCEEDED') {
+                    if (isRateLimitError(errorBanner.code)) {
                       setIsRateLimited(false);
                     }
                   }}
@@ -416,7 +539,7 @@ export function ChatPage() {
                 Ask anything about your profile
               </p>
               <p className="text-sm text-slate-500 mt-1.5">
-                Multi-turn conversations are persisted in PostgreSQL with Gemini Flash context.
+                Multi-turn conversations, image attachments, and PostgreSQL history powered by Gemini Flash.
               </p>
             </div>
 

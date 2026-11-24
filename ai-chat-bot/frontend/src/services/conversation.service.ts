@@ -1,4 +1,4 @@
-// Phase 3 Conversation Service — Talks to FastAPI `/api/conversations` backed by PostgreSQL
+// Phase 4 Conversation Service — Talks to FastAPI `/api/conversations` & preserves message attachment metadata
 
 import type {
   ApiErrorResponse,
@@ -69,7 +69,7 @@ export function formatMessageTimestamp(isoString: string): string {
   });
 }
 
-// Converts a persisted PostgreSQL message row into the UI's `ChatMessageItem` shape
+// Converts a persisted PostgreSQL message row (including Phase 4 `attachments`) into `ChatMessageItem`
 export function mapPersistedMessageToItem(msg: PersistedMessageItem): ChatMessageItem {
   return {
     id: `db-msg-${msg.id}`,
@@ -79,6 +79,7 @@ export function mapPersistedMessageToItem(msg: PersistedMessageItem): ChatMessag
     createdAt: formatMessageTimestamp(msg.created_at),
     mode: msg.mode ?? (msg.role === 'assistant' ? 'gemini_flash' : undefined),
     model: msg.model,
+    attachments: Array.isArray(msg.attachments) ? msg.attachments : undefined,
   };
 }
 
@@ -160,7 +161,7 @@ export async function createConversation(
   return (await response.json()) as ConversationSummary;
 }
 
-// GET /api/conversations/{conversation_id} — Fetches conversation details + persisted messages
+// GET /api/conversations/{conversation_id} — Fetches conversation details + persisted messages & attachments
 export async function getConversationDetail(
   conversationId: number,
   signal?: AbortSignal

@@ -1,21 +1,26 @@
-// Phase 2 Message Bubble — Renders user & assistant turns with clean Markdown formatting
+// Phase 4 Message Bubble — Renders user & assistant turns, Markdown formatting, and attachment metadata
 
 import { Fragment, useState, type ReactNode } from 'react';
-import type { ChatMessageItem } from '../types/chat';
+import type { AttachmentMetadata, ChatMessageItem } from '../types/chat';
 
 interface MessageBubbleProps {
   message: ChatMessageItem;
 }
 
+function formatAttachmentBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${kb.toFixed(1)} KB`;
+  return `${(kb / 1024).toFixed(2)} MB`;
+}
+
 // Parses inline Markdown inside a single line: **bold** and `inline code`
 function renderInlineMarkdown(text: string): ReactNode[] {
-  // Splits text wherever **bold** or `code` appears while keeping the matched tokens
   const tokens = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
 
   return tokens.map((token, index) => {
     if (!token) return null;
 
-    // **bold**
     if (token.startsWith('**') && token.endsWith('**') && token.length > 4) {
       return (
         <strong key={index} className="font-semibold text-slate-950">
@@ -24,7 +29,6 @@ function renderInlineMarkdown(text: string): ReactNode[] {
       );
     }
 
-    // `inline code`
     if (token.startsWith('`') && token.endsWith('`') && token.length > 2) {
       return (
         <code
@@ -50,7 +54,6 @@ function MarkdownContent({ content }: { content: string }) {
     const line = lines[i];
     const trimmed = line.trim();
 
-    // 1. Fenced code block (``` ... ```)
     if (trimmed.startsWith('```')) {
       const codeLines: string[] = [];
       i += 1;
@@ -58,7 +61,7 @@ function MarkdownContent({ content }: { content: string }) {
         codeLines.push(lines[i]);
         i += 1;
       }
-      i += 1; // Skip closing ```
+      i += 1;
       elements.push(
         <pre
           key={`code-${i}`}
@@ -70,13 +73,11 @@ function MarkdownContent({ content }: { content: string }) {
       continue;
     }
 
-    // 2. Blank line (spacing between blocks)
     if (!trimmed) {
       i += 1;
       continue;
     }
 
-    // 3. Markdown Heading (#, ##, ###)
     const headingMatch = trimmed.match(/^(#{1,3})\s+(.+)$/);
     if (headingMatch) {
       const level = headingMatch[1].length;
@@ -95,7 +96,6 @@ function MarkdownContent({ content }: { content: string }) {
       continue;
     }
 
-    // 4. Unordered bullet list (- item or * item)
     if (/^[-*•]\s+/.test(trimmed)) {
       const listItems: string[] = [];
       while (i < lines.length && /^[-*•]\s+/.test(lines[i].trim())) {
@@ -114,7 +114,6 @@ function MarkdownContent({ content }: { content: string }) {
       continue;
     }
 
-    // 5. Ordered numbered list (1. item, 2. item)
     if (/^\d+\.\s+/.test(trimmed)) {
       const orderedItems: string[] = [];
       while (i < lines.length && /^\d+\.\s+/.test(lines[i].trim())) {
@@ -133,7 +132,6 @@ function MarkdownContent({ content }: { content: string }) {
       continue;
     }
 
-    // 6. Standard paragraph
     elements.push(
       <p key={`p-${i}`} className="my-1.5 first:mt-0 last:mb-0 leading-relaxed">
         {renderInlineMarkdown(line)}
@@ -143,6 +141,40 @@ function MarkdownContent({ content }: { content: string }) {
   }
 
   return <div className="text-sm text-slate-800">{elements}</div>;
+}
+
+function AttachmentChips({
+  attachments,
+  isUser,
+}: {
+  attachments: AttachmentMetadata[];
+  isUser: boolean;
+}) {
+  if (!attachments.length) return null;
+
+  return (
+    <div className={`flex flex-wrap gap-1.5 ${isUser ? 'mb-2 justify-end' : 'mb-2 justify-start'}`}>
+      {attachments.map((att) => (
+        <div
+          key={att.id}
+          className={`inline-flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-[11px] border ${
+            isUser
+              ? 'border-slate-700 bg-slate-800/90 text-slate-100'
+              : 'border-slate-200 bg-white text-slate-700'
+          }`}
+        >
+          <span className="font-medium truncate max-w-48">{att.file_name}</span>
+          <span
+            className={
+              isUser ? 'text-slate-300' : 'text-slate-400'
+            }
+          >
+            {att.mime_type} • {formatAttachmentBytes(att.file_size)}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export function MessageBubble({ message }: MessageBubbleProps) {
@@ -191,6 +223,11 @@ export function MessageBubble({ message }: MessageBubbleProps) {
           <span>{message.createdAt}</span>
         </div>
 
+        {/* Persisted or Sent Attachment Metadata */}
+        {message.attachments && message.attachments.length > 0 && (
+          <AttachmentChips attachments={message.attachments} isUser={isUser} />
+        )}
+
         {/* Bubble Surface */}
         <div
           className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
@@ -199,7 +236,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
               : 'bg-slate-50 border border-slate-200/90 text-slate-800'
           }`}
         >
-          {isUser ? message.text : <MarkdownContent content={message.text}/>}
+          {isUser ? message.text : <MarkdownContent content={message.text} />}
         </div>
 
         {/* Assistant Footer Actions (Copy) */}

@@ -1,14 +1,25 @@
-// Phase 3 Chat Service — Talks to FastAPI POST /api/chat with optional `conversation_id` for multi-turn memory
+// Phase 4 Chat Service — Talks to FastAPI POST /api/chat with optional image attachments & rate-limit handling
 
 import type {
   ApiErrorResponse,
   ChatRequestPayload,
   ChatResponsePayload,
   HealthCheckResponse,
+  PendingImageAttachment,
+  SupportedImageMimeType,
 } from '../types/chat';
 
 // Base address of your Python FastAPI backend running locally
 const API_BASE_URL = 'http://127.0.0.1:8000/api';
+
+// Phase 4 attachment constraints
+export const SUPPORTED_IMAGE_MIME_TYPES: readonly SupportedImageMimeType[] = [
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+];
+export const MAX_IMAGE_BYTES = 4 * 1024 * 1024; // 4 MB decoded bytes limit
+export const MAX_IMAGE_BASE64_CHARS = 5_600_000;
 
 // Error codes where the user can safely try sending the same message again manually
 const RETRYABLE_ERROR_CODES = new Set<string>([
@@ -32,6 +43,78 @@ export class ChatApiError extends Error {
   }
 }
 
+export function isSupportedImageMimeType(mime: string): mime is SupportedImageMimeType {
+  return (SUPPORTED_IMAGE_MIME_TYPES as readonly string[]).includes(mime);
+}
+
+// Estimates decoded byte size of a base64 string (ignoring padding `=`)
+export function estimateBase64DecodedBytes(base64String: string): number {
+  const cleaned = base64String.replace(/\s+/g, '');
+  if (!cleaned) return 0;
+  const paddingMatch = cleaned.match(/=+$/);
+  const paddingLength = paddingMatch ? paddingMatch[0].length : 0;
+  return Math.max(0, Math.floor((cleaned.length * 3) / 4) - paddingLength);
+}
+
+// Normalizes base64 input in case a data URL prefix (`data:image/png;base64,...`) is supplied
+function normalizeBase64Payload(rawBase64: string): string {
+  const commaIndex = rawBase64.indexOf(',');
+  if (rawBase64.startsWith('data:') && commaIndex !== -1) {
+    return rawBase64.slice(commaIndex + 1).trim();
+  }
+  return rawBase64.trim();
+}
+
+// Validates an image attachment against Phase 4 MIME type, decoded size (<= 4 MB), and base64 length limits
+export function validateImageAttachment(
+  attachment: Pick<PendingImageAttachment, 'mimeType' | 'base64' | 'fileSize' | 'fileName'>
+): { cleanBase64: string; mimeType: SupportedImageMimeType; fileName?: string } {
+  if (!isSupportedImageMimeType(attachment.mimeType)) {
+    throw new ChatApiError(
+      'INVALID_ATTACHMENT',
+      `Unsupported image type "${attachment.mimeType}". Allowed types: JPEG, PNG, and WebP.`,
+      422,
+      false
+    );
+  }
+
+  const cleanBase64 = normalizeBase64Payload(attachment.base64);
+  if (!cleanBase64) {
+    throw new ChatApiError(
+      'INVALID_ATTACHMENT',
+      'Image data is empty or invalid.',
+      422,
+      false
+    );
+  }
+
+  if (cleanBase64.length > MAX_IMAGE_BASE64_CHARS) {
+    throw new ChatApiError(
+      'ATTACHMENT_TOO_LARGE',
+      `Encoded image exceeds the maximum allowed size (${MAX_IMAGE_BASE64_CHARS.toLocaleString()} base64 characters).`,
+      413,
+      false
+    );
+  }
+
+  const estimatedBytes = estimateBase64DecodedBytes(cleanBase64);
+  if (estimatedBytes > MAX_IMAGE_BYTES || attachment.fileSize > MAX_IMAGE_BYTES) {
+    throw new ChatApiError(
+      'ATTACHMENT_TOO_LARGE',
+      'Image size exceeds the 4 MB limit. Please select a smaller JPEG, PNG, or WebP image.',
+      413,
+      false
+    );
+  }
+
+  const trimmedName = attachment.fileName?.trim();
+  return {
+    cleanBase64,
+    mimeType: attachment.mimeType,
+    fileName: trimmedName ? trimmedName.slice(0, 255) : undefined,
+  };
+}
+
 // Safely checks if a parsed JSON object matches `{ error: { code: string, message: string } }`
 function isApiErrorResponse(value: unknown): value is ApiErrorResponse {
   if (typeof value !== 'object' || value === null) return false;
@@ -45,15 +128,29 @@ function isApiErrorResponse(value: unknown): value is ApiErrorResponse {
 function buildHttpChatError(response: Response, parsedBody: unknown): ChatApiError {
   if (isApiErrorResponse(parsedBody)) {
     const { code, message } = parsedBody.error;
-    // Explicitly ensure RATE_LIMIT_EXCEEDED is never auto-retried or treated as a retryable transient glitch
-    if (code === 'RATE_LIMIT_EXCEEDED' || response.status === 429) {
+    // Never auto-retry rate-limit rejections (429 / AI_RATE_LIMITED / RATE_LIMIT_EXCEEDED)
+    if (
+      code === 'AI_RATE_LIMITED' ||
+      code === 'RATE_LIMIT_EXCEEDED' ||
+      response.status === 429
+    ) {
       return new ChatApiError(
-        code || 'RATE_LIMIT_EXCEEDED',
-        message || 'Rate limit or quota reached. Please wait a bit before sending another request.',
+        code || 'AI_RATE_LIMITED',
+        message || 'Rate limit reached. Please wait a moment before sending another request.',
         response.status,
         false
       );
     }
+
+    if (code === 'ATTACHMENT_TOO_LARGE' || response.status === 413) {
+      return new ChatApiError(
+        code || 'ATTACHMENT_TOO_LARGE',
+        message || 'Attached image exceeds the maximum allowed size.',
+        response.status,
+        false
+      );
+    }
+
     return new ChatApiError(code, message, response.status);
   }
 
@@ -67,10 +164,19 @@ function buildHttpChatError(response: Response, parsedBody: unknown): ChatApiErr
     );
   }
 
+  if (response.status === 413) {
+    return new ChatApiError(
+      'ATTACHMENT_TOO_LARGE',
+      'Attached image is too large (max 4 MB).',
+      413,
+      false
+    );
+  }
+
   if (response.status === 429) {
     return new ChatApiError(
-      'RATE_LIMIT_EXCEEDED',
-      'Rate limit or quota reached. Please wait before trying again.',
+      'AI_RATE_LIMITED',
+      'Rate limit reached. Please wait before sending another request.',
       429,
       false
     );
@@ -138,13 +244,24 @@ export async function checkBackendHealth(signal?: AbortSignal): Promise<HealthCh
   return parsedBody as HealthCheckResponse;
 }
 
-// Sends a user's message to POST /api/chat (with optional `conversationId`) and returns Phase 3 ChatResponsePayload
+export interface SendChatMessageOptions {
+  conversationId?: number;
+  image?: PendingImageAttachment | null;
+  signal?: AbortSignal;
+}
+
+// Sends a user's message (and optional validated image attachment) to POST /api/chat
 export async function sendChatMessage(
   messageText: string,
-  conversationId?: number,
-  signal?: AbortSignal
+  optionsOrConversationId?: SendChatMessageOptions | number,
+  legacySignal?: AbortSignal
 ): Promise<ChatResponsePayload> {
-  // Trim leading/trailing spaces before sending so pure spaces are caught cleanly
+  // Support both `(message, { conversationId, image, signal })` and legacy `(message, conversationId, signal)`
+  const options: SendChatMessageOptions =
+    typeof optionsOrConversationId === 'number' || optionsOrConversationId === undefined
+      ? { conversationId: optionsOrConversationId, signal: legacySignal }
+      : optionsOrConversationId;
+
   const trimmedMessage = messageText.trim();
 
   if (!trimmedMessage) {
@@ -160,15 +277,27 @@ export async function sendChatMessage(
     message: trimmedMessage,
   };
 
-  // Only include `conversation_id` when we have a valid positive integer conversation ID
-  if (typeof conversationId === 'number' && Number.isInteger(conversationId) && conversationId > 0) {
-    requestBody.conversation_id = conversationId;
+  if (
+    typeof options.conversationId === 'number' &&
+    Number.isInteger(options.conversationId) &&
+    options.conversationId > 0
+  ) {
+    requestBody.conversation_id = options.conversationId;
+  }
+
+  // Always pair `image_base64` and `image_mime_type` together when attaching an image
+  if (options.image) {
+    const validated = validateImageAttachment(options.image);
+    requestBody.image_base64 = validated.cleanBase64;
+    requestBody.image_mime_type = validated.mimeType;
+    if (validated.fileName) {
+      requestBody.image_file_name = validated.fileName;
+    }
   }
 
   let response: Response;
 
   try {
-    // `fetch` sends a JSON POST request to FastAPI; `credentials: 'include'` keeps cookie support ready
     response = await fetch(`${API_BASE_URL}/chat`, {
       method: 'POST',
       headers: {
@@ -176,7 +305,7 @@ export async function sendChatMessage(
       },
       credentials: 'include',
       body: JSON.stringify(requestBody),
-      signal,
+      signal: options.signal,
     });
   } catch (err) {
     if ((err as Error)?.name === 'AbortError') {
@@ -197,7 +326,6 @@ export async function sendChatMessage(
     parsedBody = null;
   }
 
-  // Any HTTP status outside 200–299 is converted into a ChatApiError
   if (!response.ok) {
     throw buildHttpChatError(response, parsedBody);
   }
@@ -210,7 +338,7 @@ export async function sendChatMessage(
   ) {
     throw new ChatApiError(
       'INVALID_RESPONSE',
-      'Backend returned an unexpected Phase 3 chat response format.',
+      'Backend returned an unexpected chat response format.',
       response.status,
       false
     );

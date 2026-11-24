@@ -1,13 +1,19 @@
-// Phase 3 Types — Aligned with FastAPI backend (`POST /api/chat` & `/api/conversations`)
+// Phase 4 Types — Aligned with FastAPI backend (`POST /api/chat` attachments & rate limiting, `/api/conversations`)
 
 // Who sent a message in the chat screen: 'user' (you) or 'assistant' (the chatbot)
 export type MessageSenderRole = 'user' | 'assistant';
+
+// Supported image MIME types accepted by backend Phase 4
+export type SupportedImageMimeType = 'image/jpeg' | 'image/png' | 'image/webp';
 
 // Known error codes returned by the backend or created on the frontend network layer
 export type KnownApiErrorCode =
   | 'VALIDATION_ERROR'
   | 'CONVERSATION_NOT_FOUND'
   | 'RATE_LIMIT_EXCEEDED'
+  | 'AI_RATE_LIMITED'
+  | 'ATTACHMENT_TOO_LARGE'
+  | 'INVALID_ATTACHMENT'
   | 'AI_UNAVAILABLE'
   | 'AI_TIMEOUT'
   | 'AI_PROVIDER_ERROR'
@@ -20,10 +26,32 @@ export type KnownApiErrorCode =
   | 'INVALID_RESPONSE'
   | 'HTTP_ERROR';
 
+// Image attachment state held in the UI composer before sending
+export interface PendingImageAttachment {
+  fileName: string;
+  mimeType: SupportedImageMimeType;
+  fileSize: number; // Original file byte size
+  base64: string; // Base64 string (without data: URL prefix)
+  previewUrl: string; // Data URL or object URL for thumbnail preview in the composer
+}
+
+// Persisted attachment metadata returned inside MessageResponse (`GET /api/conversations/{id}`)
+export interface AttachmentMetadata {
+  id: number;
+  message_id: number;
+  file_name: string;
+  mime_type: string;
+  file_size: number;
+  created_at: string;
+}
+
 // What the frontend sends in the JSON body of POST /api/chat
 export interface ChatRequestPayload {
   message: string;
   conversation_id?: number;
+  image_base64?: string;
+  image_mime_type?: SupportedImageMimeType;
+  image_file_name?: string;
 }
 
 // What the FastAPI backend returns on a 200 OK response from POST /api/chat
@@ -66,6 +94,7 @@ export interface PersistedMessageItem {
   mode?: string | null;
   model: string | null;
   created_at: string;
+  attachments?: AttachmentMetadata[];
 }
 
 // Full conversation object with persisted messages returned by GET /api/conversations/{id}
@@ -93,4 +122,5 @@ export interface ChatMessageItem {
   createdAt: string;
   mode?: string;
   model?: string | null;
+  attachments?: AttachmentMetadata[];
 }
