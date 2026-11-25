@@ -611,7 +611,7 @@ export function ChatPage() {
           <div className="flex items-center justify-between gap-2 mb-4">
             <div>
               <span className="px-2 py-0.5 rounded-full text-[11px] font-medium bg-indigo-50 text-indigo-700">
-                Phase 6 • Cookie Auth
+                Phase 8 • Cookie Auth
               </span>
               <h1 className="text-lg font-semibold text-slate-900 mt-2">
                 {authMode === 'login' ? 'Sign in to your workspace' : 'Create your account'}
@@ -803,7 +803,7 @@ export function ChatPage() {
             </h1>
 
             <span className="hidden lg:inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium bg-indigo-50 text-indigo-700">
-              Phase 7 • pgvector RAG
+              Phase 8 • Multi-Agent RAG
             </span>
 
             <span

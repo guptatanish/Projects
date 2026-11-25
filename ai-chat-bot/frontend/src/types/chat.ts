@@ -1,10 +1,10 @@
-// Phase 7 Types — Text-only chat contract + pgvector RAG grounding mode (`"pgvector_rag"`)
+// Phase 8 Types — Text-only chat contract + Multi-Agent RAG mode (`"multi_agent_rag"`)
 
 // Who sent a message in the chat screen: 'user' (you) or 'assistant' (the chatbot)
 export type MessageSenderRole = 'user' | 'assistant';
 
-// Response modes returned by POST /api/chat (`"pgvector_rag"` when grounded via knowledge_chunks)
-export type ChatResponseMode = 'pgvector_rag' | 'gemini_flash' | (string & {});
+// Response modes returned by POST /api/chat (`"multi_agent_rag"` for Phase 8 pipeline, `"pgvector_rag"` legacy)
+export type ChatResponseMode = 'multi_agent_rag' | 'pgvector_rag' | 'gemini_flash' | (string & {});
 
 // Scope/topic filter options for personal profile knowledge exploration
 export type ProfileScopeFilter = 'all' | 'git' | 'work' | 'stack' | 'education';

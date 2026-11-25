@@ -1,4 +1,4 @@
-// Phase 7 Message Bubble — Text-only Markdown formatting, pgvector_rag badge indicator, single-hero widget, copy & rating
+// Phase 8 Message Bubble — Text-only Markdown formatting, Multi-Agent RAG badge, single-hero widget, copy & rating
 
 import { Fragment, useState, type ReactNode } from 'react';
 import type { ChatMessageItem, MessageRating } from '../types/chat';
@@ -224,11 +224,33 @@ function SingleHeroProfileCard({ content }: { content: string }) {
   );
 }
 
+function getModeBadgeProps(mode: string): { label: string; title: string; isRag: boolean } {
+  if (mode === 'multi_agent_rag') {
+    return {
+      label: 'Multi-Agent RAG',
+      title: 'Generated via Phase 8 multi-agent retrieval-augmented pipeline',
+      isRag: true,
+    };
+  }
+  if (mode === 'pgvector_rag') {
+    return {
+      label: 'pgvector RAG',
+      title: 'Grounded via top-K cosine similarity retrieval against knowledge_chunks',
+      isRag: true,
+    };
+  }
+  return {
+    label: mode,
+    title: 'Answered using base profile system instruction',
+    isRag: false,
+  };
+}
+
 export function MessageBubble({ message, onRate, onCopySuccess }: MessageBubbleProps) {
   const isUser = message.role === 'user';
   const [copied, setCopied] = useState(false);
   const currentRating: MessageRating = message.rating ?? null;
-  const isPgvectorRag = message.mode === 'pgvector_rag';
+  const modeBadge = !isUser && message.mode ? getModeBadgeProps(message.mode) : null;
 
   const handleCopy = async () => {
     try {
@@ -266,25 +288,24 @@ export function MessageBubble({ message, onRate, onCopySuccess }: MessageBubbleP
             {isUser ? 'You' : 'Assistant'}
           </span>
 
-          {!isUser && message.mode && (
+          {modeBadge && (
             <span
-              title={
-                isPgvectorRag
-                  ? 'Grounded via top-K cosine similarity retrieval against knowledge_chunks'
-                  : 'Answered using base profile system instruction'
-              }
+              title={modeBadge.title}
               className={`px-1.5 py-0.5 rounded font-medium ${
-                isPgvectorRag
+                modeBadge.isRag
                   ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/70'
                   : 'bg-slate-100 text-slate-600'
               }`}
             >
-              {isPgvectorRag ? 'pgvector RAG' : message.mode}
+              {modeBadge.label}
             </span>
           )}
 
           {!isUser && message.model && (
-            <span className="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 font-medium">
+            <span
+              title="Model that generated this reply (reflects automatic fallback if primary model hit 503)"
+              className="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 font-medium"
+            >
               {message.model}
             </span>
           )}
