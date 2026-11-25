@@ -45,12 +45,10 @@ def get_conversation_by_id(
     *,
     with_messages: bool = False,
 ) -> Conversation | None:
-    """Fetch a single conversation by ID, optionally preloading its ordered messages and attachments."""
+    """Fetch a single conversation by ID, optionally preloading its ordered messages."""
     stmt = select(Conversation).where(Conversation.id == conversation_id)
     if with_messages:
-        stmt = stmt.options(
-            selectinload(Conversation.messages).selectinload(Message.attachments)
-        )
+        stmt = stmt.options(selectinload(Conversation.messages))
     return db.scalar(stmt)
 
 
@@ -88,32 +86,14 @@ def get_recent_messages(
     if max_chars is None or max_chars <= 0:
         return recent_desc
 
-    selected_reversed: list[Message] = []
+    selected_rev: list[Message] = []
     used_chars = 0
     for msg in reversed(recent_desc):
         msg_len = len(msg.content or "")
-        if selected_reversed and (used_chars + msg_len > max_chars):
+        if selected_rev and (used_chars + msg_len > max_chars):
             break
-        if not selected_reversed and msg_len > max_chars:
-            selected_reversed.append(msg)
-            break
-        selected_reversed.append(msg)
+        selected_rev.append(msg)
         used_chars += msg_len
 
-    selected_reversed.reverse()
-    return selected_reversed
-
-
-def delete_conversation(
-    db: Session,
-    conversation_id: int,
-    *,
-    conversation: Conversation | None = None,
-) -> bool:
-    """Delete a conversation by ID; returns True if deleted, False if not found."""
-    target = conversation or get_conversation_by_id(db, conversation_id, with_messages=False)
-    if target is None:
-        return False
-    db.delete(target)
-    db.commit()
-    return True
+    selected_rev.reverse()
+    return selected_rev

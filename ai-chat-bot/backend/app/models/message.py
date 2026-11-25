@@ -9,7 +9,6 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.session import Base
 
 if TYPE_CHECKING:
-    from app.models.attachment import Attachment
     from app.models.conversation import Conversation
 
 
@@ -35,7 +34,3 @@ class Message(Base):
     )
 
     conversation: Mapped[Conversation] = relationship(back_populates="messages")
-    attachments: Mapped[list[Attachment]] = relationship(
-        back_populates="message",
-        cascade="all, delete-orphan",
-    )

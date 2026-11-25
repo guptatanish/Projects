@@ -55,9 +55,8 @@ def _extract_finish_reason(response: Any) -> str | None:
 def _build_contents(
     conversation_history: list[dict[str, str]] | None,
     current_message: str,
-    optional_image: dict[str, Any] | None = None,
 ) -> list[types.Content]:
-    """Build SDK Content objects from bounded history, current prompt, and optional image."""
+    """Build SDK Content objects from bounded text history and the current prompt."""
     contents: list[types.Content] = []
 
     if conversation_history:
@@ -73,24 +72,17 @@ def _build_contents(
                     )
                 )
 
-    current_parts: list[types.Part] = []
-
-    if optional_image and optional_image.get("data") and optional_image.get("mime_type"):
-        current_parts.append(
-            types.Part.from_bytes(
-                data=optional_image["data"],
-                mime_type=optional_image["mime_type"],
-            )
+    contents.append(
+        types.Content(
+            role="user",
+            parts=[types.Part.from_text(text=current_message)],
         )
-
-    current_parts.append(types.Part.from_text(text=current_message))
-    contents.append(types.Content(role="user", parts=current_parts))
-
+    )
     return contents
 
 
 class GeminiService:
-    """Isolated wrapper around the google-genai SDK for Gemini Flash."""
+    """Isolated wrapper around the google-genai SDK for text generation."""
 
     def __init__(
         self,
@@ -102,7 +94,7 @@ class GeminiService:
             api_key if api_key is not None else settings.gemini_api_key
         ).strip()
         self.model = (
-            model if model is not None else settings.gemini_model
+            model if model is not None else settings.gemini_chat_model
         ).strip() or "gemini-3.5-flash-lite"
         default_timeout_ms = max(1000, int(settings.gemini_timeout_seconds * 1000))
         self.timeout_ms = timeout_ms if timeout_ms is not None else default_timeout_ms
@@ -126,9 +118,8 @@ class GeminiService:
         system_instruction: str | None = None,
         conversation_history: list[dict[str, str]] | None = None,
         current_message: str,
-        optional_image: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Generate a response from Gemini Flash and normalize metadata."""
+        """Generate a text response from Gemini and normalize metadata."""
         client = self._get_client()
         instruction = (
             system_instruction.strip()
@@ -138,7 +129,6 @@ class GeminiService:
         contents = _build_contents(
             conversation_history=conversation_history,
             current_message=current_message,
-            optional_image=optional_image,
         )
         config = types.GenerateContentConfig(
             system_instruction=instruction,
