@@ -1,4 +1,4 @@
-// Phase 5 Main Chat View — Auth cookies, 401/403 ownership handling, PATCH rename, FormData/JSON vision, Banner & Toast
+// Phase 6 Main Chat View — Text-only chat, auth cookies, 401/403 ownership handling, PATCH rename, Banner & Toast
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import {
@@ -22,12 +22,10 @@ import {
   renameConversation,
 } from '../services/conversation.service';
 import type {
-  AttachmentMetadata,
   AuthUser,
   ChatMessageItem,
   ConversationSummary,
   MessageRating,
-  PendingImageAttachment,
 } from '../types/chat';
 import { ConversationSidebar } from './ConversationSidebar';
 import { MessageInput, type ComposerPreferences } from './MessageInput';
@@ -92,8 +90,6 @@ export function ChatPage() {
   const [activeConversationId, setActiveConversationId] = useState<number | null>(null);
   const [messages, setMessages] = useState<ChatMessageItem[]>([]);
   const [inputText, setInputText] = useState<string>('');
-  const [selectedImage, setSelectedImage] = useState<PendingImageAttachment | null>(null);
-  const [useFormData, setUseFormData] = useState<boolean>(true);
   const [preferences, setPreferences] = useState<ComposerPreferences>(DEFAULT_PREFERENCES);
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(true);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState<boolean>(false);
@@ -335,7 +331,6 @@ export function ChatPage() {
     setActiveConversationId(null);
     setMessages([]);
     setInputText('');
-    setSelectedImage(null);
     setBannerAlert(null);
     setIsRateLimited(false);
     setMobileDrawerOpen(false);
@@ -349,7 +344,6 @@ export function ChatPage() {
       await refreshConversationList();
       setActiveConversationId(created.id);
       setMessages([]);
-      setSelectedImage(null);
       setBackendStatus('online');
       showToast('Created new conversation thread', 'success');
     } catch (error: unknown) {
@@ -371,7 +365,6 @@ export function ChatPage() {
     setMobileDrawerOpen(false);
     if (conversationId === activeConversationId && messages.length > 0) return;
     handleStop();
-    setSelectedImage(null);
     void loadConversationThread(conversationId);
   };
 
@@ -460,24 +453,6 @@ export function ChatPage() {
     }
   };
 
-  const handleAttachmentError = (message: string) => {
-    if (!message) {
-      if (
-        bannerAlert?.code === 'INVALID_ATTACHMENT' ||
-        bannerAlert?.code === 'ATTACHMENT_TOO_LARGE'
-      ) {
-        setBannerAlert(null);
-      }
-      return;
-    }
-    setBannerAlert({
-      code: 'INVALID_ATTACHMENT',
-      message,
-      severity: 'error',
-    });
-    showToast(message, 'error');
-  };
-
   const handleRateMessage = (messageId: string, rating: MessageRating) => {
     setMessages((prev) =>
       prev.map((m) => (m.id === messageId ? { ...m, rating } : m))
@@ -505,6 +480,7 @@ export function ChatPage() {
     return `${parts.join(' ')}\n${rawText}`;
   };
 
+  // Sends text-only JSON message to POST /api/chat
   const handleSend = async (
     overridePrompt?: string,
     targetConversationId?: number | null
@@ -516,22 +492,8 @@ export function ChatPage() {
       overridePrompt === undefined ? composePromptWithPreferences(rawTextToSend) : rawTextToSend;
     const conversationIdToUse =
       targetConversationId !== undefined ? targetConversationId : activeConversationId;
-    const imageToSend = overridePrompt === undefined ? selectedImage : null;
 
     setBannerAlert(null);
-
-    const optimisticAttachments: AttachmentMetadata[] | undefined = imageToSend
-      ? [
-          {
-            id: Date.now(),
-            message_id: 0,
-            file_name: imageToSend.fileName,
-            mime_type: imageToSend.mimeType,
-            file_size: imageToSend.fileSize,
-            created_at: new Date().toISOString(),
-          },
-        ]
-      : undefined;
 
     const userMessage: ChatMessageItem = {
       id: `user-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -539,7 +501,6 @@ export function ChatPage() {
       role: 'user',
       text: rawTextToSend,
       createdAt: formatCurrentTime(),
-      attachments: optimisticAttachments,
     };
 
     setMessages((prev) => [...prev, userMessage]);
@@ -554,16 +515,11 @@ export function ChatPage() {
     try {
       const response = await sendChatMessage(textToSend, {
         conversationId: conversationIdToUse ?? undefined,
-        image: imageToSend,
-        useFormData,
         signal: controller.signal,
       });
 
       setBackendStatus('online');
       setActiveConversationId(response.conversation_id);
-      if (imageToSend) {
-        setSelectedImage(null);
-      }
 
       const assistantMessage: ChatMessageItem = {
         id: `msg-${response.message_id}`,
@@ -655,7 +611,7 @@ export function ChatPage() {
           <div className="flex items-center justify-between gap-2 mb-4">
             <div>
               <span className="px-2 py-0.5 rounded-full text-[11px] font-medium bg-indigo-50 text-indigo-700">
-                Phase 5 • Cookie Auth
+                Phase 6 • Cookie Auth
               </span>
               <h1 className="text-lg font-semibold text-slate-900 mt-2">
                 {authMode === 'login' ? 'Sign in to your workspace' : 'Create your account'}
@@ -775,13 +731,8 @@ export function ChatPage() {
       onChange={setInputText}
       onSend={(promptOverride) => void handleSend(promptOverride)}
       onStop={handleStop}
-      selectedImage={selectedImage}
-      onSelectImage={setSelectedImage}
-      useFormData={useFormData}
-      onToggleFormData={setUseFormData}
       preferences={preferences}
       onChangePreferences={setPreferences}
-      onAttachmentError={handleAttachmentError}
       isLoading={isLoading}
       isRateLimited={isRateLimited}
       isEmptyState={isEmptyChat}
@@ -852,7 +803,7 @@ export function ChatPage() {
             </h1>
 
             <span className="hidden lg:inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium bg-indigo-50 text-indigo-700">
-              Phase 5 • Vision &amp; Security
+              Phase 6 • Text-Only &amp; pgvector
             </span>
 
             <span
@@ -964,7 +915,7 @@ export function ChatPage() {
                 Ask anything about your profile
               </p>
               <p className="text-sm text-slate-500 mt-1.5">
-                Cookie-authenticated threads, image uploads (up to 5 MB), and PostgreSQL history powered by Gemini Flash.
+                Cookie-authenticated threads and PostgreSQL history powered by Gemini Flash.
               </p>
             </div>
 

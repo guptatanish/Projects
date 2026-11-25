@@ -1,19 +1,12 @@
-// Phase 5 Message Bubble — Markdown formatting, single-hero structured widgets, attachments, copy & answer rating
+// Phase 6 Message Bubble — Text-only Markdown formatting, single-hero structured widgets, copy & answer rating
 
 import { Fragment, useState, type ReactNode } from 'react';
-import type { AttachmentMetadata, ChatMessageItem, MessageRating } from '../types/chat';
+import type { ChatMessageItem, MessageRating } from '../types/chat';
 
 interface MessageBubbleProps {
   message: ChatMessageItem;
   onRate?: (messageId: string, rating: MessageRating) => void;
   onCopySuccess?: (label: string) => void;
-}
-
-function formatAttachmentBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  const kb = bytes / 1024;
-  if (kb < 1024) return `${kb.toFixed(1)} KB`;
-  return `${(kb / 1024).toFixed(2)} MB`;
 }
 
 // Parses inline Markdown inside a single line: **bold** and `inline code`
@@ -231,36 +224,6 @@ function SingleHeroProfileCard({ content }: { content: string }) {
   );
 }
 
-function AttachmentChips({
-  attachments,
-  isUser,
-}: {
-  attachments: AttachmentMetadata[];
-  isUser: boolean;
-}) {
-  if (!attachments.length) return null;
-
-  return (
-    <div className={`flex flex-wrap gap-1.5 ${isUser ? 'mb-2 justify-end' : 'mb-2 justify-start'}`}>
-      {attachments.map((att) => (
-        <div
-          key={att.id}
-          className={`inline-flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-[11px] border ${
-            isUser
-              ? 'border-slate-700 bg-slate-800/90 text-slate-100'
-              : 'border-slate-200 bg-white text-slate-700'
-          }`}
-        >
-          <span className="font-medium truncate max-w-48">{att.file_name}</span>
-          <span className={isUser ? 'text-slate-300' : 'text-slate-400'}>
-            {att.mime_type} • {formatAttachmentBytes(att.file_size)}
-          </span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 export function MessageBubble({ message, onRate, onCopySuccess }: MessageBubbleProps) {
   const isUser = message.role === 'user';
   const [copied, setCopied] = useState(false);
@@ -316,11 +279,6 @@ export function MessageBubble({ message, onRate, onCopySuccess }: MessageBubbleP
 
           <span>{message.createdAt}</span>
         </div>
-
-        {/* Persisted or Sent Attachment Metadata */}
-        {message.attachments && message.attachments.length > 0 && (
-          <AttachmentChips attachments={message.attachments} isUser={isUser} />
-        )}
 
         {/* Bubble Surface */}
         <div

@@ -1,25 +1,14 @@
-// Phase 5 Chat Service — Talks to FastAPI POST /api/chat (JSON & FormData), 5 MB image limit, auth cookies & 401/403/413/429 handling
+// Phase 6 Chat Service — Talks to FastAPI POST /api/chat (JSON text-only), auth cookies & 401/403/429 handling
 
 import type {
   ApiErrorResponse,
   ChatRequestPayload,
   ChatResponsePayload,
   HealthCheckResponse,
-  PendingImageAttachment,
-  SupportedImageMimeType,
 } from '../types/chat';
 
 // Base address of your Python FastAPI backend running locally
 const API_BASE_URL = 'http://127.0.0.1:8000/api';
-
-// Phase 5 attachment constraints (JPEG, PNG, WebP up to 5 MB)
-export const SUPPORTED_IMAGE_MIME_TYPES: readonly SupportedImageMimeType[] = [
-  'image/jpeg',
-  'image/png',
-  'image/webp',
-];
-export const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5 MB limit
-export const MAX_IMAGE_BASE64_CHARS = 7_000_000;
 
 // Error codes where the user can safely try sending the same message again manually
 const RETRYABLE_ERROR_CODES = new Set<string>([
@@ -41,87 +30,6 @@ export class ChatApiError extends Error {
     this.status = status;
     this.retryable = retryable ?? RETRYABLE_ERROR_CODES.has(code);
   }
-}
-
-export function isSupportedImageMimeType(mime: string): mime is SupportedImageMimeType {
-  return (SUPPORTED_IMAGE_MIME_TYPES as readonly string[]).includes(mime);
-}
-
-// Estimates decoded byte size of a base64 string (ignoring padding `=`)
-export function estimateBase64DecodedBytes(base64String: string): number {
-  const cleaned = base64String.replace(/\s+/g, '');
-  if (!cleaned) return 0;
-  const paddingMatch = cleaned.match(/=+$/);
-  const paddingLength = paddingMatch ? paddingMatch[0].length : 0;
-  return Math.max(0, Math.floor((cleaned.length * 3) / 4) - paddingLength);
-}
-
-// Normalizes base64 input in case a data URL prefix (`data:image/png;base64,...`) is supplied
-function normalizeBase64Payload(rawBase64: string): string {
-  const commaIndex = rawBase64.indexOf(',');
-  if (rawBase64.startsWith('data:') && commaIndex !== -1) {
-    return rawBase64.slice(commaIndex + 1).trim();
-  }
-  return rawBase64.trim();
-}
-
-// Validates an image attachment against Phase 5 MIME type, 5 MB size cap, and base64 length limits
-export function validateImageAttachment(
-  attachment: Pick<PendingImageAttachment, 'mimeType' | 'base64' | 'fileSize' | 'fileName'>
-): { cleanBase64: string; mimeType: SupportedImageMimeType; fileName?: string } {
-  if (!isSupportedImageMimeType(attachment.mimeType)) {
-    throw new ChatApiError(
-      'INVALID_ATTACHMENT',
-      `Unsupported image type "${attachment.mimeType}". Allowed types: JPEG, PNG, and WebP.`,
-      422,
-      false
-    );
-  }
-
-  if (attachment.fileSize > MAX_IMAGE_BYTES) {
-    throw new ChatApiError(
-      'ATTACHMENT_TOO_LARGE',
-      'Image size exceeds the 5 MB limit. Please select a smaller JPEG, PNG, or WebP image.',
-      413,
-      false
-    );
-  }
-
-  const cleanBase64 = normalizeBase64Payload(attachment.base64);
-  if (!cleanBase64) {
-    throw new ChatApiError(
-      'INVALID_ATTACHMENT',
-      'Image data is empty or invalid.',
-      422,
-      false
-    );
-  }
-
-  if (cleanBase64.length > MAX_IMAGE_BASE64_CHARS) {
-    throw new ChatApiError(
-      'ATTACHMENT_TOO_LARGE',
-      `Encoded image exceeds the maximum allowed size (${MAX_IMAGE_BASE64_CHARS.toLocaleString()} base64 characters).`,
-      413,
-      false
-    );
-  }
-
-  const estimatedBytes = estimateBase64DecodedBytes(cleanBase64);
-  if (estimatedBytes > MAX_IMAGE_BYTES) {
-    throw new ChatApiError(
-      'ATTACHMENT_TOO_LARGE',
-      'Image size exceeds the 5 MB limit. Please select a smaller JPEG, PNG, or WebP image.',
-      413,
-      false
-    );
-  }
-
-  const trimmedName = attachment.fileName?.trim();
-  return {
-    cleanBase64,
-    mimeType: attachment.mimeType,
-    fileName: trimmedName ? trimmedName.slice(0, 255) : undefined,
-  };
 }
 
 // Safely checks if a parsed JSON object matches `{ error: { code: string, message: string } }`
@@ -170,15 +78,6 @@ function buildHttpChatError(response: Response, parsedBody: unknown): ChatApiErr
       );
     }
 
-    if (code === 'ATTACHMENT_TOO_LARGE' || response.status === 413) {
-      return new ChatApiError(
-        code || 'ATTACHMENT_TOO_LARGE',
-        message || 'Attached image exceeds the 5 MB limit.',
-        response.status,
-        false
-      );
-    }
-
     return new ChatApiError(code, message, response.status);
   }
 
@@ -206,15 +105,6 @@ function buildHttpChatError(response: Response, parsedBody: unknown): ChatApiErr
       'CONVERSATION_NOT_FOUND',
       'Conversation was not found on the server.',
       404,
-      false
-    );
-  }
-
-  if (response.status === 413) {
-    return new ChatApiError(
-      'ATTACHMENT_TOO_LARGE',
-      'Attached image is too large (max 5 MB).',
-      413,
       false
     );
   }
@@ -292,12 +182,10 @@ export async function checkBackendHealth(signal?: AbortSignal): Promise<HealthCh
 
 export interface SendChatMessageOptions {
   conversationId?: number;
-  image?: PendingImageAttachment | null;
-  useFormData?: boolean;
   signal?: AbortSignal;
 }
 
-// Sends a user's message (and optional validated image attachment via JSON or multipart FormData) to POST /api/chat
+// Sends a text-only JSON message (`{ message, conversation_id? }`) to POST /api/chat
 export async function sendChatMessage(
   messageText: string,
   optionsOrConversationId?: SendChatMessageOptions | number,
@@ -326,55 +214,15 @@ export async function sendChatMessage(
       ? options.conversationId
       : undefined;
 
-  let fetchInit: RequestInit;
+  const requestBody: ChatRequestPayload = {
+    message: trimmedMessage,
+    ...(validConversationId !== undefined ? { conversation_id: validConversationId } : {}),
+  };
 
-  if (options.image) {
-    const validated = validateImageAttachment(options.image);
+  let response: Response;
 
-    if (options.useFormData && options.image.file) {
-      const formData = new FormData();
-      formData.append('message', trimmedMessage);
-      if (validConversationId !== undefined) {
-        formData.append('conversation_id', String(validConversationId));
-      }
-      formData.append(
-        'image',
-        options.image.file,
-        validated.fileName || options.image.file.name || 'upload'
-      );
-
-      fetchInit = {
-        method: 'POST',
-        credentials: 'include',
-        body: formData,
-        signal: options.signal,
-      };
-    } else {
-      const requestBody: ChatRequestPayload = {
-        message: trimmedMessage,
-        ...(validConversationId !== undefined ? { conversation_id: validConversationId } : {}),
-        image_base64: validated.cleanBase64,
-        image_mime_type: validated.mimeType,
-        ...(validated.fileName ? { image_file_name: validated.fileName } : {}),
-      };
-
-      fetchInit = {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
-        body: JSON.stringify(requestBody),
-        signal: options.signal,
-      };
-    }
-  } else {
-    const requestBody: ChatRequestPayload = {
-      message: trimmedMessage,
-      ...(validConversationId !== undefined ? { conversation_id: validConversationId } : {}),
-    };
-
-    fetchInit = {
+  try {
+    response = await fetch(`${API_BASE_URL}/chat`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -382,13 +230,7 @@ export async function sendChatMessage(
       credentials: 'include',
       body: JSON.stringify(requestBody),
       signal: options.signal,
-    };
-  }
-
-  let response: Response;
-
-  try {
-    response = await fetch(`${API_BASE_URL}/chat`, fetchInit);
+    });
   } catch (err) {
     if ((err as Error)?.name === 'AbortError') {
       throw err;

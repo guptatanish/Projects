@@ -1,23 +1,15 @@
-// Phase 5 Prompt Composer — ImagePreview, JSON/FormData toggle, scope/filter popover, Markdown preview, and Send/Stop
+// Phase 6 Prompt Composer — Text-only input, scope/filter popover, Markdown preview, and Send/Stop
 
 import {
   Fragment,
   useEffect,
   useRef,
   useState,
-  type ChangeEvent,
   type FormEvent,
   type KeyboardEvent,
   type ReactNode,
 } from 'react';
-import {
-  estimateBase64DecodedBytes,
-  isSupportedImageMimeType,
-  MAX_IMAGE_BASE64_CHARS,
-  MAX_IMAGE_BYTES,
-} from '../services/chat.service';
-import type { PendingImageAttachment, ProfileScopeFilter } from '../types/chat';
-import { ImagePreview } from './ImagePreview';
+import type { ProfileScopeFilter } from '../types/chat';
 
 export interface ComposerPreferences {
   scope: ProfileScopeFilter;
@@ -33,13 +25,8 @@ interface MessageInputProps {
   onChange: (nextValue: string) => void;
   onSend: (overridePrompt?: string) => void;
   onStop: () => void;
-  selectedImage: PendingImageAttachment | null;
-  onSelectImage: (image: PendingImageAttachment | null) => void;
-  useFormData?: boolean;
-  onToggleFormData?: (next: boolean) => void;
   preferences?: ComposerPreferences;
   onChangePreferences?: (next: ComposerPreferences) => void;
-  onAttachmentError?: (message: string) => void;
   isLoading: boolean;
   isRateLimited?: boolean;
   isEmptyState?: boolean;
@@ -54,13 +41,6 @@ const SCOPE_OPTIONS: { id: ProfileScopeFilter; label: string; hint: string }[] =
   { id: 'stack', label: 'Stack', hint: 'Tools & frameworks' },
   { id: 'education', label: 'Education', hint: 'Degrees & milestones' },
 ];
-
-function formatFileSizeLabel(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  const kb = bytes / 1024;
-  if (kb < 1024) return `${kb.toFixed(1)} KB`;
-  return `${(kb / 1024).toFixed(2)} MB`;
-}
 
 function renderComposerInline(text: string): ReactNode[] {
   const tokens = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
@@ -172,13 +152,8 @@ export function MessageInput({
   onChange,
   onSend,
   onStop,
-  selectedImage,
-  onSelectImage,
-  useFormData = false,
-  onToggleFormData,
   preferences,
   onChangePreferences,
-  onAttachmentError,
   isLoading,
   isRateLimited = false,
   isEmptyState = false,
@@ -186,7 +161,6 @@ export function MessageInput({
   maxLength = 4000,
 }: MessageInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [previewMarkdown, setPreviewMarkdown] = useState<boolean>(false);
   const [filterPopoverOpen, setFilterPopoverOpen] = useState<boolean>(false);
 
@@ -201,63 +175,6 @@ export function MessageInput({
     const nextHeight = Math.min(el.scrollHeight, 176);
     el.style.height = `${Math.max(nextHeight, 44)}px`;
   }, [value, previewMarkdown]);
-
-  const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.target.value = '';
-    if (!file) return;
-
-    if (!isSupportedImageMimeType(file.type)) {
-      onAttachmentError?.(
-        `Unsupported file type "${file.type || 'unknown'}". Please choose a JPEG, PNG, or WebP image.`
-      );
-      return;
-    }
-
-    if (file.size > MAX_IMAGE_BYTES) {
-      onAttachmentError?.(
-        `Image "${file.name}" (${formatFileSizeLabel(file.size)}) exceeds the 5 MB limit.`
-      );
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = typeof reader.result === 'string' ? reader.result : '';
-      const commaIdx = result.indexOf(',');
-      const base64Only = commaIdx !== -1 ? result.slice(commaIdx + 1) : result;
-
-      if (!base64Only) {
-        onAttachmentError?.('Could not read image data.');
-        return;
-      }
-
-      if (base64Only.length > MAX_IMAGE_BASE64_CHARS) {
-        onAttachmentError?.('Encoded image exceeds the maximum allowed base64 size.');
-        return;
-      }
-
-      const decodedBytes = estimateBase64DecodedBytes(base64Only);
-      if (decodedBytes > MAX_IMAGE_BYTES) {
-        onAttachmentError?.('Decoded image size exceeds the 5 MB limit.');
-        return;
-      }
-
-      onAttachmentError?.('');
-      onSelectImage({
-        file,
-        fileName: file.name,
-        mimeType: file.type,
-        fileSize: file.size,
-        base64: base64Only,
-        previewUrl: result,
-      });
-    };
-    reader.onerror = () => {
-      onAttachmentError?.('Failed to read the selected image file.');
-    };
-    reader.readAsDataURL(file);
-  };
 
   const handleFormSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -322,28 +239,16 @@ export function MessageInput({
           <div />
         )}
 
-        <div className="flex items-center gap-2">
-          {selectedImage && onToggleFormData && (
-            <button
-              type="button"
-              onClick={() => onToggleFormData(!useFormData)}
-              className="px-2.5 py-1 rounded-lg border border-slate-200 bg-white text-[11px] font-medium text-slate-700 hover:bg-slate-100 cursor-pointer"
-            >
-              Payload: {useFormData ? 'FormData' : 'JSON'}
-            </button>
-          )}
-
-          {preferences && onChangePreferences && (
-            <button
-              type="button"
-              onClick={() => setFilterPopoverOpen((prev) => !prev)}
-              aria-expanded={filterPopoverOpen}
-              className="px-2.5 py-1 rounded-lg border border-slate-200 bg-white text-[11px] font-medium text-slate-700 hover:bg-slate-100 cursor-pointer"
-            >
-              {filterPopoverOpen ? 'Close Filters' : 'Filters & Options'}
-            </button>
-          )}
-        </div>
+        {preferences && onChangePreferences && (
+          <button
+            type="button"
+            onClick={() => setFilterPopoverOpen((prev) => !prev)}
+            aria-expanded={filterPopoverOpen}
+            className="px-2.5 py-1 rounded-lg border border-slate-200 bg-white text-[11px] font-medium text-slate-700 hover:bg-slate-100 cursor-pointer"
+          >
+            {filterPopoverOpen ? 'Close Filters' : 'Filters & Options'}
+          </button>
+        )}
       </div>
 
       {/* Filter & Preference Popover */}
@@ -507,38 +412,7 @@ export function MessageInput({
         onSubmit={handleFormSubmit}
         className="rounded-2xl border border-slate-200 bg-white p-3 shadow-xs focus-within:border-slate-400 transition-colors"
       >
-        {/* Selected Image Attachment Preview */}
-        {selectedImage && (
-          <ImagePreview
-            image={selectedImage}
-            useFormData={useFormData}
-            disabled={isLoading}
-            onRemove={() => onSelectImage(null)}
-          />
-        )}
-
-        {/* Hidden File Input for JPEG / PNG / WebP */}
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/jpeg,image/png,image/webp"
-          onChange={handleFileChange}
-          className="hidden"
-          aria-label="Attach image"
-        />
-
         <div className="flex items-end gap-2">
-          <button
-            type="button"
-            disabled={isLoading || isRateLimited}
-            onClick={() => fileInputRef.current?.click()}
-            title="Attach image (JPEG, PNG, WebP — max 5 MB)"
-            aria-label="Attach image"
-            className="px-2.5 py-2 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 disabled:opacity-40 text-xs font-medium text-slate-700 transition-colors cursor-pointer shrink-0"
-          >
-            + Image
-          </button>
-
           {previewMarkdown ? (
             <div className="flex-1 min-w-0">
               <ComposerMarkdownPreview text={value} />
@@ -586,7 +460,7 @@ export function MessageInput({
             <span className="truncate">
               {isRateLimited
                 ? 'Rate limit active (no automatic retries)'
-                : 'Enter to send • Shift + Enter for new line • JPEG/PNG/WebP ≤ 5 MB'}
+                : 'Enter to send • Shift + Enter for new line'}
             </span>
           </div>
 
