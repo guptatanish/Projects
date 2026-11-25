@@ -1,4 +1,4 @@
-// Phase 6 Message Bubble — Text-only Markdown formatting, single-hero structured widgets, copy & answer rating
+// Phase 7 Message Bubble — Text-only Markdown formatting, pgvector_rag badge indicator, single-hero widget, copy & rating
 
 import { Fragment, useState, type ReactNode } from 'react';
 import type { ChatMessageItem, MessageRating } from '../types/chat';
@@ -228,6 +228,7 @@ export function MessageBubble({ message, onRate, onCopySuccess }: MessageBubbleP
   const isUser = message.role === 'user';
   const [copied, setCopied] = useState(false);
   const currentRating: MessageRating = message.rating ?? null;
+  const isPgvectorRag = message.mode === 'pgvector_rag';
 
   const handleCopy = async () => {
     try {
@@ -266,8 +267,19 @@ export function MessageBubble({ message, onRate, onCopySuccess }: MessageBubbleP
           </span>
 
           {!isUser && message.mode && (
-            <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-medium">
-              {message.mode}
+            <span
+              title={
+                isPgvectorRag
+                  ? 'Grounded via top-K cosine similarity retrieval against knowledge_chunks'
+                  : 'Answered using base profile system instruction'
+              }
+              className={`px-1.5 py-0.5 rounded font-medium ${
+                isPgvectorRag
+                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/70'
+                  : 'bg-slate-100 text-slate-600'
+              }`}
+            >
+              {isPgvectorRag ? 'pgvector RAG' : message.mode}
             </span>
           )}
 

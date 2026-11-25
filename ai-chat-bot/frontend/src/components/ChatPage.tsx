@@ -803,7 +803,7 @@ export function ChatPage() {
             </h1>
 
             <span className="hidden lg:inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium bg-indigo-50 text-indigo-700">
-              Phase 6 • Text-Only &amp; pgvector
+              Phase 7 • pgvector RAG
             </span>
 
             <span

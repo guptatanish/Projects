@@ -1,7 +1,10 @@
-// Phase 6 Types — Text-only chat contract aligned with FastAPI backend (`/api/auth/*`, `/api/conversations`, `POST /api/chat`)
+// Phase 7 Types — Text-only chat contract + pgvector RAG grounding mode (`"pgvector_rag"`)
 
 // Who sent a message in the chat screen: 'user' (you) or 'assistant' (the chatbot)
 export type MessageSenderRole = 'user' | 'assistant';
+
+// Response modes returned by POST /api/chat (`"pgvector_rag"` when grounded via knowledge_chunks)
+export type ChatResponseMode = 'pgvector_rag' | 'gemini_flash' | (string & {});
 
 // Scope/topic filter options for personal profile knowledge exploration
 export type ProfileScopeFilter = 'all' | 'git' | 'work' | 'stack' | 'education';
@@ -76,7 +79,7 @@ export interface ChatResponsePayload {
   message_id: number;
   reply: string;
   role: 'assistant';
-  mode: string;
+  mode: ChatResponseMode;
   model: string | null;
 }
 
@@ -114,7 +117,7 @@ export interface PersistedMessageItem {
   conversation_id: number;
   role: MessageSenderRole;
   content: string;
-  mode?: string | null;
+  mode?: ChatResponseMode | null;
   model: string | null;
   created_at: string;
 }
@@ -142,7 +145,7 @@ export interface ChatMessageItem {
   role: MessageSenderRole;
   text: string;
   createdAt: string;
-  mode?: string;
+  mode?: ChatResponseMode;
   model?: string | null;
   rating?: MessageRating;
 }
