@@ -81,13 +81,53 @@ def _build_contents(
     return contents
 
 
+def _map_sdk_exception(exc: Exception, *, operation: str) -> AppError:
+    """Translate google-genai SDK errors into consistent AppError / RateLimitExceededError responses."""
+    err_text = str(exc).lower()
+    if "429" in err_text or "resource_exhausted" in err_text or "quota" in err_text:
+        logger.warning("Gemini %s rate limit / quota error: %s", operation, exc)
+        return RateLimitExceededError(
+            "Gemini API quota or rate limit reached. Please try again shortly."
+        )
+
+    if "503" in err_text or "unavailable" in err_text:
+        logger.warning("Gemini %s temporarily unavailable (503): %s", operation, exc)
+        return AppError(
+            code="AI_UNAVAILABLE",
+            message="The AI model is temporarily experiencing high demand. Please try again.",
+            status_code=503,
+        )
+
+    if (
+        "504" in err_text
+        or "deadline_exceeded" in err_text
+        or "timeout" in err_text
+        or "timed out" in err_text
+    ):
+        logger.warning("Gemini %s timed out / deadline exceeded: %s", operation, exc)
+        return AppError(
+            code="AI_TIMEOUT",
+            message="The AI service took too long to respond. Please try again.",
+            status_code=504,
+        )
+
+    logger.exception("Gemini SDK %s failed", operation, exc_info=exc)
+    return AppError(
+        code="AI_PROVIDER_ERROR",
+        message="Unable to complete the request with the AI service right now.",
+        status_code=502,
+    )
+
+
 class GeminiService:
-    """Isolated wrapper around the google-genai SDK for text generation."""
+    """Isolated wrapper around the google-genai SDK for text generation and embeddings."""
 
     def __init__(
         self,
         api_key: str | None = None,
         model: str | None = None,
+        embedding_model: str | None = None,
+        embedding_dimensions: int | None = None,
         timeout_ms: int | None = None,
     ) -> None:
         self.api_key = (
@@ -96,6 +136,12 @@ class GeminiService:
         self.model = (
             model if model is not None else settings.gemini_chat_model
         ).strip() or "gemini-3.5-flash-lite"
+        self.embedding_model = (
+            embedding_model if embedding_model is not None else settings.gemini_embedding_model
+        ).strip() or "gemini-embedding-001"
+        self.embedding_dimensions = (
+            embedding_dimensions if embedding_dimensions is not None else settings.embedding_dimensions
+        )
         default_timeout_ms = max(1000, int(settings.gemini_timeout_seconds * 1000))
         self.timeout_ms = timeout_ms if timeout_ms is not None else default_timeout_ms
 
@@ -118,14 +164,20 @@ class GeminiService:
         system_instruction: str | None = None,
         conversation_history: list[dict[str, str]] | None = None,
         current_message: str,
+        retrieved_context: str | None = None,
     ) -> dict[str, Any]:
         """Generate a text response from Gemini and normalize metadata."""
         client = self._get_client()
-        instruction = (
+        base_instruction = (
             system_instruction.strip()
             if system_instruction and system_instruction.strip()
             else DEFAULT_PROFILE_SYSTEM_INSTRUCTION
         )
+        if retrieved_context and retrieved_context.strip():
+            instruction = f"{base_instruction}\n\n{retrieved_context.strip()}"
+        else:
+            instruction = base_instruction
+
         contents = _build_contents(
             conversation_history=conversation_history,
             current_message=current_message,
@@ -142,40 +194,7 @@ class GeminiService:
                 config=config,
             )
         except Exception as exc:
-            err_text = str(exc).lower()
-            if "429" in err_text or "resource_exhausted" in err_text or "quota" in err_text:
-                logger.warning("Gemini rate limit / quota error: %s", exc)
-                raise RateLimitExceededError(
-                    "Gemini API quota or rate limit reached. Please try again shortly."
-                ) from exc
-
-            if "503" in err_text or "unavailable" in err_text:
-                logger.warning("Gemini model temporarily unavailable (503): %s", exc)
-                raise AppError(
-                    code="AI_UNAVAILABLE",
-                    message="The AI model is temporarily experiencing high demand. Please try again.",
-                    status_code=503,
-                ) from exc
-
-            if (
-                "504" in err_text
-                or "deadline_exceeded" in err_text
-                or "timeout" in err_text
-                or "timed out" in err_text
-            ):
-                logger.warning("Gemini request timed out / deadline exceeded: %s", exc)
-                raise AppError(
-                    code="AI_TIMEOUT",
-                    message="The AI service took too long to respond. Please try again.",
-                    status_code=504,
-                ) from exc
-
-            logger.exception("Gemini SDK call failed", exc_info=exc)
-            raise AppError(
-                code="AI_PROVIDER_ERROR",
-                message="Unable to generate a response from the AI service right now.",
-                status_code=502,
-            ) from exc
+            raise _map_sdk_exception(exc, operation="generate_content") from exc
 
         reply_text = (getattr(response, "text", None) or "").strip()
         if not reply_text:
@@ -191,6 +210,76 @@ class GeminiService:
             "tokenUsage": _extract_token_usage(response),
             "finishReason": _extract_finish_reason(response),
         }
+
+    def embed_texts(
+        self,
+        texts: list[str],
+        *,
+        output_dimensionality: int | None = None,
+    ) -> list[list[float]]:
+        """Generate vector embeddings for one or more non-empty strings."""
+        cleaned_texts = [t.strip() for t in texts if t and t.strip()]
+        if not cleaned_texts:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                message="At least one non-empty text string is required for embedding.",
+                status_code=422,
+            )
+
+        target_dims = (
+            output_dimensionality
+            if output_dimensionality is not None
+            else self.embedding_dimensions
+        )
+        client = self._get_client()
+        embed_config = types.EmbedContentConfig(output_dimensionality=target_dims)
+
+        try:
+            response = client.models.embed_content(
+                model=self.embedding_model,
+                contents=cleaned_texts,
+                config=embed_config,
+            )
+        except Exception as exc:
+            raise _map_sdk_exception(exc, operation="embed_content") from exc
+
+        embeddings_attr = getattr(response, "embeddings", None) or []
+        vectors: list[list[float]] = []
+        for item in embeddings_attr:
+            values = getattr(item, "values", None)
+            if not values:
+                continue
+            vec = [float(v) for v in values]
+            if len(vec) != target_dims:
+                raise AppError(
+                    code="AI_EMBEDDING_DIM_MISMATCH",
+                    message=(
+                        f"Expected {target_dims}-dimensional embedding, received {len(vec)}."
+                    ),
+                    status_code=502,
+                )
+            vectors.append(vec)
+
+        if len(vectors) != len(cleaned_texts):
+            raise AppError(
+                code="AI_EMPTY_EMBEDDING",
+                message="The AI service did not return embeddings for all input texts.",
+                status_code=502,
+            )
+
+        return vectors
+
+    def embed_text(
+        self,
+        text: str,
+        *,
+        output_dimensionality: int | None = None,
+    ) -> list[float]:
+        """Generate a single vector embedding for a query or knowledge chunk."""
+        return self.embed_texts(
+            [text],
+            output_dimensionality=output_dimensionality,
+        )[0]
 
 
 gemini_service = GeminiService()

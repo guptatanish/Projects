@@ -1,4 +1,5 @@
-from datetime import datetime, timezone
+﻿from datetime import datetime, timezone
+import logging
 
 from sqlalchemy.orm import Session
 
@@ -10,6 +11,12 @@ from app.models.conversation import Conversation
 from app.models.message import Message
 from app.services import conversation_service
 from app.services.gemini_service import gemini_service
+from app.services.knowledge_service import (
+    format_retrieved_context,
+    retrieve_relevant_chunks,
+)
+
+logger = logging.getLogger(__name__)
 
 
 def _build_default_title(message_text: str) -> str:
@@ -18,6 +25,17 @@ def _build_default_title(message_text: str) -> str:
     if len(single_line) <= 60:
         return single_line
     return f"{single_line[:57].rstrip()}..."
+
+
+def _safe_retrieve_context(db: Session, query_text: str, *, top_k: int = 4) -> str | None:
+    """Retrieve pgvector knowledge chunks for grounding; degrade gracefully if unavailable."""
+    try:
+        chunks = retrieve_relevant_chunks(db, query_text, top_k=top_k)
+        formatted = format_retrieved_context(chunks)
+        return formatted or None
+    except Exception as exc:
+        logger.warning("pgvector retrieval skipped/degraded: %s", exc)
+        return None
 
 
 def send_chat_message(
@@ -85,9 +103,12 @@ def send_chat_message(
     db.add(user_message)
     db.flush()
 
+    retrieved_context = _safe_retrieve_context(db, message_text, top_k=4)
+
     ai_result = gemini_service.generate_reply(
         conversation_history=conversation_history,
         current_message=message_text,
+        retrieved_context=retrieved_context,
     )
 
     reply_text = str(ai_result["text"])
@@ -114,6 +135,6 @@ def send_chat_message(
         "message_id": assistant_message.id,
         "reply": reply_text,
         "role": "assistant",
-        "mode": "gemini_flash",
+        "mode": "pgvector_rag",
         "model": model_used,
     }
