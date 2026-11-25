@@ -10,11 +10,7 @@ from app.core.rate_limit import chat_rate_limiter
 from app.models.conversation import Conversation
 from app.models.message import Message
 from app.services import conversation_service
-from app.services.gemini_service import gemini_service
-from app.services.knowledge_service import (
-    format_retrieved_context,
-    retrieve_relevant_chunks,
-)
+from app.services.agent_pipeline import run_multi_agent_pipeline
 
 logger = logging.getLogger(__name__)
 
@@ -27,17 +23,6 @@ def _build_default_title(message_text: str) -> str:
     return f"{single_line[:57].rstrip()}..."
 
 
-def _safe_retrieve_context(db: Session, query_text: str, *, top_k: int = 4) -> str | None:
-    """Retrieve pgvector knowledge chunks for grounding; degrade gracefully if unavailable."""
-    try:
-        chunks = retrieve_relevant_chunks(db, query_text, top_k=top_k)
-        formatted = format_retrieved_context(chunks)
-        return formatted or None
-    except Exception as exc:
-        logger.warning("pgvector retrieval skipped/degraded: %s", exc)
-        return None
-
-
 def send_chat_message(
     db: Session,
     *,
@@ -48,7 +33,7 @@ def send_chat_message(
     history_max_chars: int | None = None,
     rate_limit_key: str = "default",
 ) -> dict[str, object]:
-    """Persist user and assistant text messages and generate a Gemini reply."""
+    """Persist user and assistant text messages via the lean multi-agent RAG pipeline."""
     chat_rate_limiter.check_and_record(rate_limit_key)
 
     if conversation_id is not None:
@@ -103,16 +88,15 @@ def send_chat_message(
     db.add(user_message)
     db.flush()
 
-    retrieved_context = _safe_retrieve_context(db, message_text, top_k=4)
-
-    ai_result = gemini_service.generate_reply(
+    pipeline_result = run_multi_agent_pipeline(
+        db,
+        message_text=message_text,
         conversation_history=conversation_history,
-        current_message=message_text,
-        retrieved_context=retrieved_context,
     )
 
-    reply_text = str(ai_result["text"])
-    model_used = str(ai_result["model"])
+    reply_text = str(pipeline_result["reply"])
+    model_used = str(pipeline_result["model"])
+    mode_used = str(pipeline_result.get("mode") or "multi_agent_rag")
 
     assistant_message = Message(
         conversation_id=conversation.id,
@@ -135,6 +119,6 @@ def send_chat_message(
         "message_id": assistant_message.id,
         "reply": reply_text,
         "role": "assistant",
-        "mode": "pgvector_rag",
+        "mode": mode_used,
         "model": model_used,
     }
