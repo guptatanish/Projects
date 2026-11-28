@@ -1,4 +1,4 @@
-from fastapi import Depends, Request
+﻿from fastapi import Depends, Request
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -8,6 +8,18 @@ from app.db.session import get_db
 from app.models.conversation import Conversation
 from app.models.user import User
 from app.services import auth_service
+
+
+def extract_client_ip(request: Request) -> str:
+    """Resolve client IP without trusting an arbitrary spoofable first X-Forwarded-For hop."""
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if forwarded_for:
+        parts = [p.strip() for p in forwarded_for.split(",") if p.strip()]
+        if parts:
+            return parts[-1]
+    if request.client and request.client.host:
+        return request.client.host
+    return "anonymous"
 
 
 def get_current_user(
@@ -54,10 +66,15 @@ def get_current_user(
 
 def ensure_conversation_owner(
     conversation: Conversation,
-    current_user: User,
+    current_user_or_id: User | int,
 ) -> None:
-    """Enforce that `current_user` owns `conversation` (IDOR guard -> 403 Forbidden)."""
-    if conversation.user_id is None or conversation.user_id != current_user.id:
+    """Enforce that `current_user_or_id` owns `conversation` (IDOR guard -> 403 Forbidden)."""
+    actor_id = (
+        current_user_or_id
+        if isinstance(current_user_or_id, int)
+        else current_user_or_id.id
+    )
+    if conversation.user_id is None or conversation.user_id != actor_id:
         raise AppError(
             code="FORBIDDEN",
             message="You do not have permission to access this conversation.",

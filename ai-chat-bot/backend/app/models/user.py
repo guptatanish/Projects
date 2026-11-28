@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
@@ -23,5 +23,4 @@ class User(Base, TimestampMixin):
 
     conversations: Mapped[list[Conversation]] = relationship(
         back_populates="user",
-        cascade="all, delete-orphan",
     )

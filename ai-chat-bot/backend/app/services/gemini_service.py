@@ -1,4 +1,5 @@
-import logging
+﻿import logging
+import math
 from typing import Any
 
 from google import genai
@@ -9,21 +10,31 @@ from app.core.errors import AppError, RateLimitExceededError
 
 logger = logging.getLogger(__name__)
 
+_CLIENT_CACHE: dict[tuple[str, int], genai.Client] = {}
+
 DEFAULT_PROFILE_SYSTEM_INSTRUCTION = """You are the personal profile and knowledge assistant for Tanish Gupta.
-Answer questions accurately, clearly, and concisely based on the profile facts below.
+Answer questions accurately, clearly, and concisely based on the public portfolio facts below.
 If something is not covered in the profile, state clearly that it is not listed rather than inventing details.
 
 Profile Overview:
 - Name: Tanish Gupta
-- Role: Software Developer working on a React + TypeScript monorepo project (including data tables for AI for ARD, PRs, unit tests, linting, and pipelines), and conducting technical interviews for React + TypeScript testing roles (DOM behavior, useEffect, test writing, Node package management).
+- Role: Software Developer working on React + TypeScript monorepo architectures (pull requests, unit tests, linting, CI/CD pipelines) and conducting technical interviews for React + TypeScript testing roles (DOM behavior, useEffect, testing scripts, Node.js package management).
 - Location: Bengaluru, India.
 - Key Projects:
-  1. `enterprise-ui`: Open-source React, TypeScript, and Vite component library and design system (40+ components/building blocks, Storybook, Tailwind CSS, ESLint, unit testing; scoped for React).
-  2. `ai-chat-bot`: Personal profile and knowledge chatbot pairing a React + TypeScript + Vite frontend (using `enterprise-ui`) with a FastAPI + PostgreSQL backend.
+  1. `enterprise-ui`: React, TypeScript, and Vite component library and design system (40+ components/building blocks, Storybook, Tailwind CSS, ESLint, unit testing; scoped for React).
+  2. `ai-chat-bot`: Personal profile and knowledge chatbot pairing a React + TypeScript + Vite frontend (using `enterprise-ui`) with a FastAPI + PostgreSQL (`pgvector`) backend and a 3-stage multi-agent RAG pipeline.
   3. Real-time 1v1 video Roast Battle web app prototype (FastAPI, Socket.IO, Redis, WebRTC signaling, JWT auth).
-- Core Tech Stack: React, TypeScript, Vite, Tailwind CSS, Node.js, Python, FastAPI, PostgreSQL, SQLAlchemy, Alembic, Docker, WSL 2, Git.
+- Core Tech Stack: React, TypeScript, Vite, Tailwind CSS, Node.js, Python, FastAPI, PostgreSQL, SQLAlchemy, Alembic, pgvector, Docker, WSL 2, Git.
 - Education & Background: Graphic Era University (including pre-incubation/incubation review exposure at TBI-GEU Inventorium in Dehradun).
 """
+
+
+def _l2_normalize(values: list[float]) -> list[float]:
+    """L2-normalize a vector so cosine similarity/distance stays accurate at reduced dimensions."""
+    norm = math.sqrt(sum(v * v for v in values))
+    if norm <= 1e-12:
+        return values
+    return [v / norm for v in values]
 
 
 def _extract_token_usage(response: Any) -> dict[str, int | None]:
@@ -146,17 +157,22 @@ class GeminiService:
         self.timeout_ms = timeout_ms if timeout_ms is not None else default_timeout_ms
 
     def _get_client(self) -> genai.Client:
-        """Create a genai.Client using the server-side API key and explicit timeout."""
+        """Return a cached genai.Client keyed by API key and timeout to avoid churn."""
         if not self.api_key:
             raise AppError(
                 code="AI_CONFIG_MISSING",
                 message="GEMINI_API_KEY is not configured on the server.",
                 status_code=500,
             )
-        return genai.Client(
-            api_key=self.api_key,
-            http_options=types.HttpOptions(timeout=self.timeout_ms),
-        )
+        cache_key = (self.api_key, int(self.timeout_ms))
+        client = _CLIENT_CACHE.get(cache_key)
+        if client is None:
+            client = genai.Client(
+                api_key=self.api_key,
+                http_options=types.HttpOptions(timeout=self.timeout_ms),
+            )
+            _CLIENT_CACHE[cache_key] = client
+        return client
 
     def generate_reply(
         self,
@@ -216,8 +232,9 @@ class GeminiService:
         texts: list[str],
         *,
         output_dimensionality: int | None = None,
+        task_type: str | None = None,
     ) -> list[list[float]]:
-        """Generate vector embeddings for one or more non-empty strings."""
+        """Generate L2-normalized vector embeddings for one or more non-empty strings."""
         cleaned_texts = [t.strip() for t in texts if t and t.strip()]
         if not cleaned_texts:
             raise AppError(
@@ -232,7 +249,10 @@ class GeminiService:
             else self.embedding_dimensions
         )
         client = self._get_client()
-        embed_config = types.EmbedContentConfig(output_dimensionality=target_dims)
+        config_kwargs: dict[str, Any] = {"output_dimensionality": target_dims}
+        if task_type:
+            config_kwargs["task_type"] = task_type
+        embed_config = types.EmbedContentConfig(**config_kwargs)
 
         try:
             response = client.models.embed_content(
@@ -249,7 +269,7 @@ class GeminiService:
             values = getattr(item, "values", None)
             if not values:
                 continue
-            vec = [float(v) for v in values]
+            vec = _l2_normalize([float(v) for v in values])
             if len(vec) != target_dims:
                 raise AppError(
                     code="AI_EMBEDDING_DIM_MISMATCH",
@@ -274,11 +294,13 @@ class GeminiService:
         text: str,
         *,
         output_dimensionality: int | None = None,
+        task_type: str | None = None,
     ) -> list[float]:
-        """Generate a single vector embedding for a query or knowledge chunk."""
+        """Generate a single L2-normalized vector embedding."""
         return self.embed_texts(
             [text],
             output_dimensionality=output_dimensionality,
+            task_type=task_type,
         )[0]
 
 

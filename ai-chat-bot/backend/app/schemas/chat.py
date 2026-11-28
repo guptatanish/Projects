@@ -1,5 +1,5 @@
-from datetime import datetime
-from typing import Literal
+﻿from datetime import datetime
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -18,6 +18,20 @@ class CreateConversationRequest(BaseModel):
         return trimmed or None
 
 
+class RenameConversationRequest(BaseModel):
+    """Request payload for renaming an existing conversation (requires non-empty title)."""
+
+    title: str = Field(..., min_length=1, max_length=200)
+
+    @field_validator("title")
+    @classmethod
+    def validate_non_empty_title(cls, value: str) -> str:
+        cleaned = " ".join(value.strip().split())
+        if not cleaned:
+            raise ValueError("Title cannot be empty or whitespace only.")
+        return cleaned
+
+
 class MessageResponse(BaseModel):
     """Serialized representation of a single persisted message."""
 
@@ -28,6 +42,7 @@ class MessageResponse(BaseModel):
     role: Literal["user", "assistant"]
     content: str
     model: str | None = None
+    response_metadata: dict[str, Any] | None = None
     created_at: datetime
 
 
@@ -53,6 +68,8 @@ class ChatRequest(BaseModel):
 
     message: str = Field(..., min_length=1, max_length=4000)
     conversation_id: int | None = Field(default=None, ge=1)
+    scope: str | None = Field(default=None, max_length=64)
+    detail_level: Literal["concise", "detailed"] | None = None
 
     @field_validator("message")
     @classmethod
@@ -73,3 +90,9 @@ class ChatResponse(BaseModel):
     role: Literal["assistant"] = "assistant"
     mode: str
     model: str
+    sources: list[dict[str, Any]] = Field(default_factory=list)
+    hero_type: str | None = None
+    hero_data: dict[str, Any] | None = None
+    cached: bool = False
+    token_usage: dict[str, int | None] | None = None
+    finish_reason: str | None = None

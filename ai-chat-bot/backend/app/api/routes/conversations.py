@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Response
+﻿from fastapi import APIRouter, Depends, Response
 from sqlalchemy.orm import Session
 
 from app.api.deps import ensure_conversation_owner, get_current_user
@@ -9,6 +9,7 @@ from app.schemas.chat import (
     ConversationDetailResponse,
     ConversationSummaryResponse,
     CreateConversationRequest,
+    RenameConversationRequest,
 )
 from app.services import conversation_service
 
@@ -68,7 +69,7 @@ def get_conversation(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ConversationDetailResponse:
-    """Fetch a single conversation along with its chronological messages and attachments."""
+    """Fetch a single conversation along with its chronological messages."""
     conversation = conversation_service.get_conversation_by_id(
         db,
         conversation_id,
@@ -91,7 +92,7 @@ def get_conversation(
 )
 def update_conversation(
     conversation_id: int,
-    payload: CreateConversationRequest,
+    payload: RenameConversationRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ConversationSummaryResponse:
@@ -108,11 +109,10 @@ def update_conversation(
             status_code=404,
         )
     ensure_conversation_owner(conversation, current_user)
-    new_title = payload.title or "New Chat"
     updated = conversation_service.rename_conversation(
         db,
         conversation,
-        title=new_title,
+        title=payload.title,
     )
     return ConversationSummaryResponse.model_validate(updated)
 

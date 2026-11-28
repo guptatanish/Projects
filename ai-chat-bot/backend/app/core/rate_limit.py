@@ -1,8 +1,9 @@
-from collections import deque
+﻿from collections import deque
 from datetime import datetime, timezone
 from threading import Lock
 import time
 
+from app.core.config import settings
 from app.core.errors import RateLimitExceededError
 
 
@@ -21,6 +22,31 @@ class InMemoryRateLimiter:
         self._lock = Lock()
         self._minute_hits: dict[str, deque[float]] = {}
         self._daily_hits: dict[str, tuple[str, int]] = {}
+        self._last_prune_mono: float = time.monotonic()
+
+    def _prune_stale_locked(self, now_mono: float, today_utc: str) -> None:
+        """Evict expired minute timestamps and keys from prior UTC days periodically."""
+        if now_mono - self._last_prune_mono < 60.0:
+            return
+        self._last_prune_mono = now_mono
+
+        cutoff = now_mono - self.window_seconds
+        expired_minute_keys: list[str] = []
+        for key, bucket in self._minute_hits.items():
+            while bucket and bucket[0] <= cutoff:
+                bucket.popleft()
+            if not bucket:
+                expired_minute_keys.append(key)
+        for key in expired_minute_keys:
+            del self._minute_hits[key]
+
+        stale_day_keys = [
+            key
+            for key, (day_str, _) in self._daily_hits.items()
+            if day_str != today_utc
+        ]
+        for key in stale_day_keys:
+            del self._daily_hits[key]
 
     def check_and_record(self, key: str = "default") -> None:
         """Record a request for `key` or raise RateLimitExceededError if over quota."""
@@ -29,6 +55,8 @@ class InMemoryRateLimiter:
         today_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
         with self._lock:
+            self._prune_stale_locked(now_mono, today_utc)
+
             day_key, day_count = self._daily_hits.get(normalized_key, (today_utc, 0))
             if day_key != today_utc:
                 day_key = today_utc
@@ -64,7 +92,13 @@ class InMemoryRateLimiter:
 
 
 chat_rate_limiter = InMemoryRateLimiter(
-    max_requests_per_minute=20,
-    max_requests_per_day=300,
+    max_requests_per_minute=settings.rate_limit_per_minute,
+    max_requests_per_day=settings.rate_limit_per_day,
+    window_seconds=60.0,
+)
+
+auth_rate_limiter = InMemoryRateLimiter(
+    max_requests_per_minute=settings.auth_rate_limit_per_minute,
+    max_requests_per_day=settings.auth_rate_limit_per_day,
     window_seconds=60.0,
 )

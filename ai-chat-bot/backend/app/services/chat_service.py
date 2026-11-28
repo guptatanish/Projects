@@ -29,37 +29,41 @@ def send_chat_message(
     message_text: str,
     conversation_id: int | None = None,
     user_id: int | None = None,
+    scope: str | None = None,
+    detail_level: str | None = None,
     history_limit: int | None = None,
     history_max_chars: int | None = None,
     rate_limit_key: str = "default",
 ) -> dict[str, object]:
     """Persist user and assistant text messages via the lean multi-agent RAG pipeline."""
-    chat_rate_limiter.check_and_record(rate_limit_key)
-
+    existing_conversation: Conversation | None = None
     if conversation_id is not None:
-        conversation = conversation_service.get_conversation_by_id(
+        existing_conversation = conversation_service.get_conversation_by_id(
             db,
             conversation_id,
             with_messages=False,
         )
-        if conversation is None:
+        if existing_conversation is None:
             raise AppError(
                 code="CONVERSATION_NOT_FOUND",
                 message=f"Conversation {conversation_id} was not found.",
                 status_code=404,
             )
         if user_id is not None:
-            ensure_conversation_owner(
-                conversation,
-                type("AuthUser", (), {"id": user_id})(),
-            )
-    else:
+            ensure_conversation_owner(existing_conversation, user_id)
+
+    chat_rate_limiter.check_and_record(rate_limit_key)
+
+    if existing_conversation is None:
         conversation = Conversation(
             title=_build_default_title(message_text)[:200],
             user_id=user_id,
         )
         db.add(conversation)
-        db.flush()
+        db.commit()
+        db.refresh(conversation)
+    else:
+        conversation = existing_conversation
 
     effective_limit = (
         settings.history_message_limit if history_limit is None else history_limit
@@ -86,31 +90,47 @@ def send_chat_message(
         model=None,
     )
     db.add(user_message)
-    db.flush()
+    if conversation.title == "New Chat":
+        conversation.title = _build_default_title(message_text)[:200]
+    conversation.updated_at = datetime.now(timezone.utc)
+    db.commit()
 
     pipeline_result = run_multi_agent_pipeline(
         db,
         message_text=message_text,
         conversation_history=conversation_history,
+        scope=scope,
+        detail_level=detail_level,
     )
 
     reply_text = str(pipeline_result["reply"])
     model_used = str(pipeline_result["model"])
     mode_used = str(pipeline_result.get("mode") or "multi_agent_rag")
+    sources = list(pipeline_result.get("sources") or [])
+    hero_type = pipeline_result.get("hero_type")
+    hero_data = pipeline_result.get("hero_data")
+    cached_flag = bool(pipeline_result.get("cached", False))
+    token_usage = pipeline_result.get("token_usage")
+    finish_reason = pipeline_result.get("finish_reason")
+
+    metadata_payload = {
+        "mode": mode_used,
+        "sources": sources,
+        "hero_type": hero_type,
+        "hero_data": hero_data,
+        "cached": cached_flag,
+        "finish_reason": finish_reason,
+    }
 
     assistant_message = Message(
         conversation_id=conversation.id,
         role="assistant",
         content=reply_text,
         model=model_used,
+        response_metadata=metadata_payload,
     )
     db.add(assistant_message)
-    db.flush()
-
-    if conversation.title == "New Chat":
-        conversation.title = _build_default_title(message_text)[:200]
     conversation.updated_at = datetime.now(timezone.utc)
-
     db.commit()
     db.refresh(assistant_message)
 
@@ -121,4 +141,10 @@ def send_chat_message(
         "role": "assistant",
         "mode": mode_used,
         "model": model_used,
+        "sources": sources,
+        "hero_type": hero_type,
+        "hero_data": hero_data,
+        "cached": cached_flag,
+        "token_usage": token_usage,
+        "finish_reason": finish_reason,
     }

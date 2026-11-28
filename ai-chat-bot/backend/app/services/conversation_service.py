@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+﻿from datetime import datetime, timezone
 
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session, selectinload
@@ -65,6 +65,25 @@ def rename_conversation(
     db.commit()
     db.refresh(conversation)
     return conversation
+
+
+def delete_conversation(
+    db: Session,
+    conversation_id: int,
+    *,
+    conversation: Conversation | None = None,
+) -> bool:
+    """Delete a conversation and its cascade-linked messages from PostgreSQL."""
+    target = conversation or get_conversation_by_id(
+        db,
+        conversation_id,
+        with_messages=False,
+    )
+    if target is None:
+        return False
+    db.delete(target)
+    db.commit()
+    return True
 
 
 def get_recent_messages(

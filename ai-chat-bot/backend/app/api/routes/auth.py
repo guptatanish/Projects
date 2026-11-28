@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends, Response
+﻿from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import extract_client_ip, get_current_user
 from app.core.config import settings
+from app.core.rate_limit import auth_rate_limiter
 from app.core.security import create_access_token
 from app.db.session import get_db
 from app.models.user import User
@@ -52,11 +53,13 @@ def _clear_session_cookie(response: Response) -> None:
     status_code=201,
 )
 def register(
+    request: Request,
     payload: RegisterRequest,
     response: Response,
     db: Session = Depends(get_db),
 ) -> AuthSessionResponse:
     """Register a new user and start an HttpOnly cookie session."""
+    auth_rate_limiter.check_and_record(f"register:{extract_client_ip(request)}")
     user = auth_service.register_user(
         db,
         email=payload.email,
@@ -76,11 +79,13 @@ def register(
     status_code=200,
 )
 def login(
+    request: Request,
     payload: LoginRequest,
     response: Response,
     db: Session = Depends(get_db),
 ) -> AuthSessionResponse:
     """Authenticate credentials and set an HttpOnly JWT session cookie."""
+    auth_rate_limiter.check_and_record(f"login:{extract_client_ip(request)}")
     user = auth_service.authenticate_user(
         db,
         email=payload.email,

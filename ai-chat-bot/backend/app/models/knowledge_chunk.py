@@ -18,7 +18,7 @@ class KnowledgeChunk(TimestampMixin, Base):
     source_key: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     title: Mapped[str] = mapped_column(String(200), nullable=False)
-    section: Mapped[str] = mapped_column(String(120), nullable=False, default="general")
+    section: Mapped[str] = mapped_column(String(120), nullable=False, default="general", index=True)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     embedding: Mapped[list[float]] = mapped_column(
         Vector(settings.embedding_dimensions),

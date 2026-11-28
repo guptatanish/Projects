@@ -1,0 +1,35 @@
+﻿services:
+  - type: web
+    name: ai-chat-bot-backend
+    runtime: python
+    plan: free
+    buildCommand: pip install --upgrade pip && pip install .
+    startCommand: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1
+    healthCheckPath: /api/health
+    envVars:
+      - key: APP_NAME
+        value: ai-chat-bot-backend
+      - key: ENVIRONMENT
+        value: production
+      - key: API_V1_PREFIX
+        value: /api
+      - key: GEMINI_ROUTER_MODEL
+        value: gemini-3.5-flash-lite
+      - key: GEMINI_CHAT_MODEL
+        value: gemini-3.8-flash
+      - key: GEMINI_EMBEDDING_MODEL
+        value: gemini-embedding-001
+      - key: EMBEDDING_DIMENSIONS
+        value: "768"
+      - key: COOKIE_SAMESITE
+        value: lax
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: CORS_ORIGINS
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET_KEY
+        sync: false
